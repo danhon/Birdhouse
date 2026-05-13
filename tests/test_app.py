@@ -15,6 +15,7 @@ def config(tmp_path):
         birdnet_db_path=tmp_path / "birdnet.db",
         port=8090,
         image_cache_dir=tmp_path / "images",
+        min_confidence=0.6,
         timezone=ZoneInfo("America/Los_Angeles"),
         poll_interval=60,
         slide_duration=8,

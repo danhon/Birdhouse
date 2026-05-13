@@ -119,11 +119,20 @@ class TestQueryTodayFromDb:
         rows = query_today_from_db(db_path, TZ)
         assert rows[0][1] == _today_ts(8)
 
-    def test_includes_all_confidence_levels(self, db_path):
-        # No confidence filter — matches BirdNET-Go dashboard behaviour
-        _insert_detection(db_path, label_id=1, detected_at=_today_ts(8), confidence=0.3)
+    def test_excludes_below_min_confidence(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(8), confidence=0.4)
+        rows = query_today_from_db(db_path, TZ, min_confidence=0.6)
+        assert rows == []
+
+    def test_includes_at_min_confidence(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(8), confidence=0.6)
+        rows = query_today_from_db(db_path, TZ, min_confidence=0.6)
+        assert len(rows) == 1
+
+    def test_zero_confidence_includes_all(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(8), confidence=0.1)
         _insert_detection(db_path, label_id=2, detected_at=_today_ts(9), confidence=0.9)
-        rows = query_today_from_db(db_path, TZ)
+        rows = query_today_from_db(db_path, TZ, min_confidence=0.0)
         assert len(rows) == 2
 
     def test_returns_empty_on_missing_db(self, tmp_path):

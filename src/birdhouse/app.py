@@ -39,6 +39,7 @@ class Config:
     birdnet_db_path: Path
     port: int
     image_cache_dir: Path
+    min_confidence: float
     timezone: ZoneInfo
     poll_interval: int
     slide_duration: int
@@ -50,6 +51,7 @@ class Config:
             birdnet_db_path=Path(os.environ.get("BIRDNET_DB_PATH", "/home/danhon/birdnet-go-app/data/birdnet.db")),
             port=int(os.environ.get("PORT", "8090")),
             image_cache_dir=Path(os.environ.get("IMAGE_CACHE_DIR", "data/image-cache")),
+            min_confidence=float(os.environ.get("MIN_CONFIDENCE", "0.6")),
             timezone=ZoneInfo(os.environ.get("TZ", "America/Los_Angeles")),
             poll_interval=int(os.environ.get("POLL_INTERVAL", "60")),
             slide_duration=int(os.environ.get("SLIDE_DURATION", "8")),
@@ -96,14 +98,14 @@ def _db_connect(db_path: Path) -> sqlite3.Connection:
 def query_today_from_db(
     db_path: Path,
     tz: ZoneInfo,
+    min_confidence: float = 0.0,
 ) -> list[tuple[str, int, int]]:
     """
     Query BirdNET-Go's SQLite database for today's species.
 
-    No confidence filter — we match BirdNET-Go's own dashboard which shows
-    all detections that passed its internal threshold. Returns a list of
-    (scientific_name, first_seen_unix_ts, detection_count) sorted by first
-    detection time ascending.
+    Returns a list of (scientific_name, first_seen_unix_ts, detection_count)
+    sorted by first detection time ascending, filtered to detections at or
+    above min_confidence.
     """
     ts_start, ts_end = _day_bounds(tz)
     try:
@@ -116,10 +118,11 @@ def query_today_from_db(
             FROM detections d
             JOIN labels l ON l.id = d.label_id
             WHERE d.detected_at BETWEEN ? AND ?
+              AND d.confidence >= ?
             GROUP BY d.label_id
             ORDER BY first_seen ASC
             """,
-            (ts_start, ts_end),
+            (ts_start, ts_end, min_confidence),
         ).fetchall()
         conn.close()
         return [(r["scientific_name"], r["first_seen"], r["n"]) for r in rows]
@@ -286,7 +289,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
     """Fetch today's data from the DB, images from iNaturalist, update store."""
     log.info("Refreshing from DB: %s", config.birdnet_db_path)
 
-    rows = query_today_from_db(config.birdnet_db_path, config.timezone)
+    rows = query_today_from_db(config.birdnet_db_path, config.timezone, config.min_confidence)
     log.info("DB returned %d unique species", len(rows))
 
     # Top up the common name cache for any species we haven't seen before
