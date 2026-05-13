@@ -42,25 +42,32 @@ BirdNET-Go API ──poll every 60s──► Birdhouse (Flask)
 
 ## Page layout
 
+This is an **art piece, not a dashboard.** The bird photo is the whole page. Text is minimal and subordinate to the image.
+
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Birdhouse                  Tuesday 13 May 2026      │
-│  14 species today                                     │
-├──────────────────────────────────────────────────────┤
-│ [photo]  American Crow                    5:24 pm    │
-│          Corvus brachyrhynchos                        │
-│                                                       │
-│ [photo]  House Finch                      5:26 pm    │
-│          Haemorhous mexicanus                         │
-│   ...                                                 │
+│                                                      │
+│                                                      │
+│           [full-bleed species photo]                 │
+│                                                      │
+│                                                      │
+│                                                      │
+│  American Crow                            5:24 pm   │
+│  Corvus brachyrhynchos          3 of 14 today  ›    │
 └──────────────────────────────────────────────────────┘
 ```
 
-- **Header**: "Birdhouse" left, full date right; "N species today" subtitle
-- **Each row**: square photo (~120×120 px) left; common name (large, bold) and scientific name (smaller, italic) stacked; first-seen time right-aligned
-- **Colour scheme**: dark background (`#111`), white/off-white text — high contrast for distance legibility
-- **Typography**: system-ui or Inter, common name ~2rem, scientific name ~1rem muted, time ~1rem muted
-- **No interactivity** — pure display, no nav, no clicks
+- **Photo**: full-bleed, fills the entire viewport. `object-fit: cover`. No borders, no padding.
+- **Overlay**: a subtle gradient at the bottom — transparent at top, dark at bottom — so text is legible over any photo without obscuring the image.
+- **Text** (bottom of screen, over gradient):
+  - Common name: large, bold, white (~3rem)
+  - Scientific name: italic, muted (~1.2rem)
+  - First-seen time: right-aligned, muted
+  - "N of M today" species counter: right-aligned, muted
+- **Carousel**: advances automatically every ~8 seconds through all species detected today, in first-detection order. Pure CSS or minimal vanilla JS — no framework.
+- **No chrome** — no header, no nav bar, no visible UI. The page *is* the bird.
+- **Colour scheme**: photo dominates; text rendered white with a text-shadow for legibility on any background photo.
+- **Typography**: system-ui or Inter, generous letter-spacing on the common name.
 
 ---
 
@@ -187,9 +194,9 @@ Request:
 GET https://api.inaturalist.org/v1/taxa?q={scientific_name}&rank=species&per_page=1
 ```
 
-Response field used: `results[0].default_photo.medium_url`
+Response field used: `results[0].default_photo.large_url` (prefer `large_url` over `medium_url` — photos fill the full viewport so resolution matters).
 
-Photos are cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg` on first fetch. If iNaturalist returns no result or the request fails, the row displays without a photo (graceful degradation — no broken image icons).
+Photos are cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg` on first fetch. If iNaturalist returns no result or the request fails, the slide shows a dark background with the text overlay only — no broken image icons.
 
 ---
 
