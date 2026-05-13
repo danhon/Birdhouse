@@ -2,13 +2,15 @@
 Birdhouse — full-bleed bird species carousel from BirdNET-Go detections.
 
 Queries the BirdNET-Go SQLite database directly for accurate per-day counts
-and first-detection times. Uses BirdNET-Go's own image_caches table for
-species photos. Fetches common names from the BirdNET-Go REST API.
+and first-detection times. Fetches species photos from iNaturalist (cached
+to disk). Fetches common names from the BirdNET-Go REST API.
 """
 
 from __future__ import annotations
 
 import logging
+import os
+import re
 import sqlite3
 import threading
 import time
@@ -19,9 +21,12 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 
 log = logging.getLogger(__name__)
+
+INATURALIST_API = "https://api.inaturalist.org/v1/taxa"
+_SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_-]")
 
 
 # ---------------------------------------------------------------------------
@@ -33,19 +38,18 @@ class Config:
     birdnet_base_url: str
     birdnet_db_path: Path
     port: int
-    min_confidence: float
+    image_cache_dir: Path
     timezone: ZoneInfo
     poll_interval: int
     slide_duration: int
 
     @classmethod
     def from_env(cls) -> "Config":
-        import os
         return cls(
             birdnet_base_url=os.environ.get("BIRDNET_BASE_URL", "http://192.168.1.100:8888").rstrip("/"),
             birdnet_db_path=Path(os.environ.get("BIRDNET_DB_PATH", "/home/danhon/birdnet-go-app/data/birdnet.db")),
             port=int(os.environ.get("PORT", "8090")),
-            min_confidence=float(os.environ.get("MIN_CONFIDENCE", "0.6")),
+            image_cache_dir=Path(os.environ.get("IMAGE_CACHE_DIR", "data/image-cache")),
             timezone=ZoneInfo(os.environ.get("TZ", "America/Los_Angeles")),
             poll_interval=int(os.environ.get("POLL_INTERVAL", "60")),
             slide_duration=int(os.environ.get("SLIDE_DURATION", "8")),
@@ -62,7 +66,7 @@ class Species:
     scientific_name: str
     first_seen: str        # "5:24 pm" local time
     detection_count: int = 0
-    image_url: Optional[str] = None
+    image_path: Optional[str] = None   # filename served at /images/<filename>
 
 
 # ---------------------------------------------------------------------------
@@ -77,26 +81,33 @@ def _day_bounds(tz: ZoneInfo) -> tuple[int, int]:
     return int(start.timestamp()), int(end.timestamp())
 
 
+def _db_connect(db_path: Path) -> sqlite3.Connection:
+    """
+    Open the BirdNET-Go DB read-only with immutable=1 so SQLite skips all
+    locking. Safe because BirdNET-Go is the sole writer. Also works when the
+    DB is on a network filesystem (SMB/NFS) where WAL-mode locking fails.
+    """
+    uri = f"file:{db_path}?mode=ro&immutable=1"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def query_today_from_db(
     db_path: Path,
     tz: ZoneInfo,
-    min_confidence: float,
 ) -> list[tuple[str, int, int]]:
     """
-    Query the BirdNET-Go SQLite database for today's species.
+    Query BirdNET-Go's SQLite database for today's species.
 
-    Returns a list of (scientific_name, first_seen_unix_ts, detection_count)
-    sorted by first detection time ascending.
+    No confidence filter — we match BirdNET-Go's own dashboard which shows
+    all detections that passed its internal threshold. Returns a list of
+    (scientific_name, first_seen_unix_ts, detection_count) sorted by first
+    detection time ascending.
     """
     ts_start, ts_end = _day_bounds(tz)
     try:
-        # Open read-only with immutable=1 so SQLite skips all locking —
-        # safe because BirdNET-Go owns the DB and we only read.
-        # This also works when the DB is on a network filesystem (SMB/NFS)
-        # where WAL-mode locking is unsupported.
-        uri = f"file:{db_path}?mode=ro&immutable=1"
-        conn = sqlite3.connect(uri, uri=True)
-        conn.row_factory = sqlite3.Row
+        conn = _db_connect(db_path)
         rows = conn.execute(
             """
             SELECT l.scientific_name,
@@ -105,11 +116,10 @@ def query_today_from_db(
             FROM detections d
             JOIN labels l ON l.id = d.label_id
             WHERE d.detected_at BETWEEN ? AND ?
-              AND d.confidence >= ?
             GROUP BY d.label_id
             ORDER BY first_seen ASC
             """,
-            (ts_start, ts_end, min_confidence),
+            (ts_start, ts_end),
         ).fetchall()
         conn.close()
         return [(r["scientific_name"], r["first_seen"], r["n"]) for r in rows]
@@ -118,36 +128,63 @@ def query_today_from_db(
         return []
 
 
-def get_image_url_from_db(db_path: Path, scientific_name: str) -> Optional[str]:
+# ---------------------------------------------------------------------------
+# iNaturalist image cache
+# ---------------------------------------------------------------------------
+
+def _safe_filename(scientific_name: str) -> str:
+    return _SAFE_NAME_RE.sub("_", scientific_name) + ".jpg"
+
+
+def fetch_species_image(
+    scientific_name: str,
+    cache_dir: Path,
+    session: requests.Session,
+) -> Optional[str]:
     """
-    Return a cached image URL from BirdNET-Go's image_caches table, or None.
-    Prefers avicommons URLs (higher resolution) over Wikimedia when both exist.
+    Return the filename (relative to cache_dir) of a cached species photo,
+    fetching from iNaturalist if not already on disk.
+    Returns None if no image is available.
     """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    filename = _safe_filename(scientific_name)
+    dest = cache_dir / filename
+
+    if dest.exists():
+        return filename
+
+    # Look up taxon on iNaturalist
     try:
-        uri = f"file:{db_path}?mode=ro&immutable=1"
-        conn = sqlite3.connect(uri, uri=True)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT ic.url
-            FROM image_caches ic
-            JOIN labels l ON l.id = ic.label_id
-            WHERE l.scientific_name = ?
-              AND ic.url IS NOT NULL
-            """,
-            (scientific_name,),
-        ).fetchall()
-        conn.close()
-        if not rows:
-            return None
-        urls = [r["url"] for r in rows]
-        # Prefer avicommons (typically larger/higher quality)
-        for url in urls:
-            if "avicommons" in url:
-                return url
-        return urls[0]
-    except Exception as exc:
-        log.warning("Image URL lookup failed for %s: %s", scientific_name, exc)
+        resp = session.get(
+            INATURALIST_API,
+            params={"q": scientific_name, "rank": "species", "per_page": 1},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results") or []
+    except requests.RequestException as exc:
+        log.warning("iNaturalist lookup failed for %s: %s", scientific_name, exc)
+        return None
+
+    if not results:
+        log.info("No iNaturalist result for %s", scientific_name)
+        return None
+
+    photo = results[0].get("default_photo") or {}
+    image_url = photo.get("large_url") or photo.get("medium_url") or ""
+
+    if not image_url:
+        log.info("No photo URL for %s", scientific_name)
+        return None
+
+    try:
+        img_resp = session.get(image_url, timeout=20)
+        img_resp.raise_for_status()
+        dest.write_bytes(img_resp.content)
+        log.info("Cached iNaturalist image for %s → %s", scientific_name, filename)
+        return filename
+    except requests.RequestException as exc:
+        log.warning("Image download failed for %s: %s", scientific_name, exc)
         return None
 
 
@@ -158,8 +195,7 @@ def get_image_url_from_db(db_path: Path, scientific_name: str) -> Optional[str]:
 class CommonNameCache:
     """
     Lazy in-memory cache mapping scientific_name → common_name.
-    Populated from the BirdNET-Go REST API (which includes commonName in
-    detection records). Falls back to the scientific name if unknown.
+    Populated from the BirdNET-Go REST API. Falls back to scientific name.
     """
 
     def __init__(self) -> None:
@@ -214,7 +250,7 @@ def _format_time(unix_ts: int, tz: ZoneInfo) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Data store (shared between background thread and Flask)
+# Data store
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -247,27 +283,26 @@ def _date_label(tz: ZoneInfo) -> str:
 
 
 def _refresh(config: Config, http: requests.Session) -> None:
-    """Fetch today's data from the DB and update the store."""
+    """Fetch today's data from the DB, images from iNaturalist, update store."""
     log.info("Refreshing from DB: %s", config.birdnet_db_path)
 
-    rows = query_today_from_db(config.birdnet_db_path, config.timezone, config.min_confidence)
+    rows = query_today_from_db(config.birdnet_db_path, config.timezone)
     log.info("DB returned %d unique species", len(rows))
 
     # Top up the common name cache for any species we haven't seen before
     unknown = _name_cache.missing([sci for sci, _, _ in rows])
     if unknown:
-        log.info("Seeding common name cache (missing: %s)", unknown)
         _name_cache.seed(config.birdnet_base_url, http)
 
     species_list = []
     for sci, first_ts, count in rows:
-        image_url = get_image_url_from_db(config.birdnet_db_path, sci)
+        image_path = fetch_species_image(sci, config.image_cache_dir, http)
         species_list.append(Species(
             common_name=_name_cache.get(sci),
             scientific_name=sci,
             first_seen=_format_time(first_ts, config.timezone),
             detection_count=count,
-            image_url=image_url,
+            image_path=image_path,
         ))
 
     now = datetime.now(config.timezone).strftime("%-I:%M %p")
@@ -314,6 +349,11 @@ def create_app(config: Optional[Config] = None) -> Flask:
             slide_duration=cfg.slide_duration,
         )
 
+    @app.route("/images/<path:filename>")
+    def images(filename: str):
+        cfg = app.config["BIRDHOUSE_CONFIG"]
+        return send_from_directory(cfg.image_cache_dir.resolve(), filename)
+
     return app
 
 
@@ -322,13 +362,13 @@ def create_app(config: Optional[Config] = None) -> Flask:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    import os
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     config = Config.from_env()
+    config.image_cache_dir.mkdir(parents=True, exist_ok=True)
     start_background_poller(config)
     app = create_app(config)
     app.run(host="0.0.0.0", port=config.port, debug=False)

@@ -14,7 +14,7 @@ def config(tmp_path):
         birdnet_base_url="http://localhost:8888",
         birdnet_db_path=tmp_path / "birdnet.db",
         port=8090,
-        min_confidence=0.6,
+        image_cache_dir=tmp_path / "images",
         timezone=ZoneInfo("America/Los_Angeles"),
         poll_interval=60,
         slide_duration=8,
@@ -85,12 +85,12 @@ class TestIndexRoute:
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
         assert b"detected once today" in client.get("/").data
 
-    def test_image_url_rendered_when_set(self, client):
+    def test_image_path_rendered_when_set(self, client):
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
-                             image_url="https://example.com/crow.jpg")])
-        assert b'src="https://example.com/crow.jpg"' in client.get("/").data
+                             image_path="Corvus_brachyrhynchos.jpg")])
+        assert b'src="/images/Corvus_brachyrhynchos.jpg"' in client.get("/").data
 
     def test_no_photo_placeholder_when_no_image(self, client):
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
-                             image_url=None)])
+                             image_path=None)])
         assert b"slide__no-photo" in client.get("/").data
