@@ -307,7 +307,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
     log.info("DB returned %d unique species", len(rows))
 
     # Top up the common name cache for any species we haven't seen before
-    unknown = _name_cache.missing([sci for sci, _, _ in rows])
+    unknown = _name_cache.missing([sci for sci, *_ in rows])
     if unknown:
         _name_cache.seed(config.birdnet_base_url, http)
 
