@@ -92,13 +92,35 @@ class TestIndexRoute:
         app_module._store.update(
             species=[
                 Species("American Crow", "Corvus brachyrhynchos", "8:00 am",
-                        image_path="Corvus_brachyrhynchos.jpg"),
+                        detection_count=3, image_path="Corvus_brachyrhynchos.jpg"),
             ],
             date_label="Monday 12 May 2026",
             last_updated="8:05 am",
         )
         response = client.get("/")
         assert b'src="/images/Corvus_brachyrhynchos.jpg"' in response.data
+        app_module._store.update([], "", "")
+
+    def test_detection_count_plural(self, client):
+        import birdhouse.app as app_module
+        app_module._store.update(
+            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am", detection_count=5)],
+            date_label="Monday 12 May 2026",
+            last_updated="8:05 am",
+        )
+        response = client.get("/")
+        assert b"detected 5 times today" in response.data
+        app_module._store.update([], "", "")
+
+    def test_detection_count_singular(self, client):
+        import birdhouse.app as app_module
+        app_module._store.update(
+            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am", detection_count=1)],
+            date_label="Monday 12 May 2026",
+            last_updated="8:05 am",
+        )
+        response = client.get("/")
+        assert b"detected once today" in response.data
         app_module._store.update([], "", "")
 
     def test_no_image_tag_when_image_path_none(self, client):

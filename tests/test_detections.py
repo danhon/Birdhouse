@@ -82,6 +82,26 @@ class TestUniqueSpecies:
         assert sp.scientific_name == "Haemorhous mexicanus"
         assert sp.image_path is None
 
+    def test_detection_count_single(self):
+        result = unique_species_from_detections([FINCH], 0.6, TZ)
+        assert result[0].detection_count == 1
+
+    def test_detection_count_multiple(self):
+        result = unique_species_from_detections([FINCH, FINCH2], 0.6, TZ)
+        assert result[0].detection_count == 2
+
+    def test_detection_count_independent_per_species(self):
+        result = unique_species_from_detections([CROW, FINCH, FINCH2], 0.6, TZ)
+        by_sci = {sp.scientific_name: sp for sp in result}
+        assert by_sci["Haemorhous mexicanus"].detection_count == 2
+        assert by_sci["Corvus brachyrhynchos"].detection_count == 1
+
+    def test_low_confidence_detections_not_counted(self):
+        result = unique_species_from_detections([FINCH, LOW], 0.6, TZ)
+        by_sci = {sp.scientific_name: sp for sp in result}
+        assert "Troglodytes aedon" not in by_sci
+        assert by_sci["Haemorhous mexicanus"].detection_count == 1
+
     def test_missing_confidence_field_is_excluded(self):
         no_conf = {"scientificName": "Corvus brachyrhynchos", "commonName": "American Crow",
                    "timestamp": "2026-05-12T08:00:00-07:00"}

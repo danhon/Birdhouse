@@ -61,6 +61,7 @@ class Species:
     common_name: str
     scientific_name: str
     first_seen: str       # "HH:MM" local time
+    detection_count: int = 0
     image_path: Optional[str] = None   # relative path served at /images/<filename>
 
 
@@ -107,6 +108,7 @@ def unique_species_from_detections(
     Returns one Species per unique scientific name, in first-detection order.
     """
     earliest: dict[str, dict] = {}  # scientific_name → detection record
+    counts: dict[str, int] = {}    # scientific_name → detection count
 
     for det in detections:
         confidence = det.get("confidence") or 0.0
@@ -116,6 +118,8 @@ def unique_species_from_detections(
         sci = (det.get("scientificName") or "").strip()
         if not sci:
             continue
+
+        counts[sci] = counts.get(sci, 0) + 1
 
         if sci not in earliest:
             earliest[sci] = det
@@ -137,6 +141,7 @@ def unique_species_from_detections(
             common_name=common,
             scientific_name=sci,
             first_seen=first_seen,
+            detection_count=counts.get(sci, 0),
         ))
 
     return result
