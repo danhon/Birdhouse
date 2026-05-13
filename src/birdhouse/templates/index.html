@@ -340,8 +340,8 @@
              target="_blank"
              rel="noopener noreferrer">{{ sp.scientific_name }}</a>
           <div class="slide__detection-count">
-            {%- if sp.detection_count == 1 %}detected once today
-            {%- else %}detected {{ sp.detection_count }} times today
+            {%- if sp.detection_count == 1 %}detected once today · last seen {{ sp.last_seen }}
+            {%- else %}detected {{ sp.detection_count }} times today · last seen {{ sp.last_seen }}
             {%- endif %}
           </div>
         </div>

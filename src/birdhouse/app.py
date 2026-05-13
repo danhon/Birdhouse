@@ -69,6 +69,7 @@ class Species:
     first_seen: str        # "5:24 pm" local time
     detection_count: int = 0
     image_path: Optional[str] = None   # filename served at /images/<filename>
+    last_seen: str = ""    # "5:24 pm" local time; equals first_seen when count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -99,13 +100,13 @@ def query_today_from_db(
     db_path: Path,
     tz: ZoneInfo,
     min_confidence: float = 0.0,
-) -> list[tuple[str, int, int]]:
+) -> list[tuple[str, int, int, int]]:
     """
     Query BirdNET-Go's SQLite database for today's species.
 
-    Returns a list of (scientific_name, first_seen_unix_ts, detection_count)
-    sorted by first detection time ascending, filtered to detections at or
-    above min_confidence.
+    Returns a list of (scientific_name, first_seen_unix_ts, last_seen_unix_ts,
+    detection_count) sorted by first detection time ascending, filtered to
+    detections at or above min_confidence.
     """
     ts_start, ts_end = _day_bounds(tz)
     try:
@@ -114,6 +115,7 @@ def query_today_from_db(
             """
             SELECT l.scientific_name,
                    MIN(d.detected_at) AS first_seen,
+                   MAX(d.detected_at) AS last_seen,
                    COUNT(*)           AS n
             FROM detections d
             JOIN labels l ON l.id = d.label_id
@@ -125,7 +127,7 @@ def query_today_from_db(
             (ts_start, ts_end, min_confidence),
         ).fetchall()
         conn.close()
-        return [(r["scientific_name"], r["first_seen"], r["n"]) for r in rows]
+        return [(r["scientific_name"], r["first_seen"], r["last_seen"], r["n"]) for r in rows]
     except Exception as exc:
         log.error("DB query failed: %s", exc)
         return []
@@ -310,7 +312,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
         _name_cache.seed(config.birdnet_base_url, http)
 
     species_list = []
-    for sci, first_ts, count in rows:
+    for sci, first_ts, last_ts, count in rows:
         image_path, inat_common = fetch_species_image(sci, config.image_cache_dir, http)
         # Seed cache with iNaturalist common name when BirdNET-Go API didn't have it
         if inat_common and _name_cache.get(sci) == sci:
@@ -319,6 +321,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
             common_name=_name_cache.get(sci),
             scientific_name=sci,
             first_seen=_format_time(first_ts, config.timezone),
+            last_seen=_format_time(last_ts, config.timezone),
             detection_count=count,
             image_path=image_path,
         ))

@@ -102,7 +102,7 @@ class TestQueryTodayFromDb:
         for hour in [8, 9, 10]:
             _insert_detection(db_path, label_id=1, detected_at=_today_ts(hour))
         rows = query_today_from_db(db_path, TZ)
-        assert rows[0][2] == 3
+        assert rows[0][3] == 3
 
     def test_sorted_by_first_detection(self, db_path):
         _insert_detection(db_path, label_id=2, detected_at=_today_ts(9))
@@ -118,6 +118,18 @@ class TestQueryTodayFromDb:
         _insert_detection(db_path, label_id=1, detected_at=_today_ts(12))
         rows = query_today_from_db(db_path, TZ)
         assert rows[0][1] == _today_ts(8)
+
+    def test_last_seen_is_latest_timestamp(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(10))
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(8))
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(12))
+        rows = query_today_from_db(db_path, TZ)
+        assert rows[0][2] == _today_ts(12)
+
+    def test_last_seen_equals_first_seen_for_single_detection(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(9))
+        rows = query_today_from_db(db_path, TZ)
+        assert rows[0][1] == rows[0][2]
 
     def test_excludes_below_min_confidence(self, db_path):
         _insert_detection(db_path, label_id=1, detected_at=_today_ts(8), confidence=0.4)

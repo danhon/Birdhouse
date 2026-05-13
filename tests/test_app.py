@@ -96,6 +96,18 @@ class TestIndexRoute:
                              image_path=None)])
         assert b"slide__no-photo" in client.get("/").data
 
+    def test_last_seen_rendered(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 5,
+                             last_seen="2:34 pm")])
+        assert b"last seen 2:34 pm" in client.get("/").data
+
+    def test_last_seen_shown_for_single_detection(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1,
+                             last_seen="8:00 am")])
+        data = client.get("/").data
+        assert b"detected once today" in data
+        assert b"last seen 8:00 am" in data
+
 
 # ---------------------------------------------------------------------------
 # Route: /data.json
