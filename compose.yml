@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    env_file: .env
+    networks: [traefik_default]
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${SERVICE_HOST}`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=${PORT:-8090}"
+    volumes:
+      # BirdNET-Go SQLite database (read-only).
+      # BIRDNET_DB_HOST_PATH is the path on the host; the app always
+      # sees the DB at /data/birdnet.db inside the container.
+      - ${BIRDNET_DB_HOST_PATH}:/data/birdnet.db:ro
+      # Cached species photos (persist across rebuilds)
+      - birdhouse-images:/app/data/image-cache
+
+networks:
+  traefik_default:
+    external: true
+
+volumes:
+  birdhouse-images:
