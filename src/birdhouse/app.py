@@ -90,7 +90,12 @@ def query_today_from_db(
     """
     ts_start, ts_end = _day_bounds(tz)
     try:
-        conn = sqlite3.connect(db_path)
+        # Open read-only with immutable=1 so SQLite skips all locking —
+        # safe because BirdNET-Go owns the DB and we only read.
+        # This also works when the DB is on a network filesystem (SMB/NFS)
+        # where WAL-mode locking is unsupported.
+        uri = f"file:{db_path}?mode=ro&immutable=1"
+        conn = sqlite3.connect(uri, uri=True)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -119,7 +124,8 @@ def get_image_url_from_db(db_path: Path, scientific_name: str) -> Optional[str]:
     Prefers avicommons URLs (higher resolution) over Wikimedia when both exist.
     """
     try:
-        conn = sqlite3.connect(db_path)
+        uri = f"file:{db_path}?mode=ro&immutable=1"
+        conn = sqlite3.connect(uri, uri=True)
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
