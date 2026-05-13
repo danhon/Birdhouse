@@ -107,6 +107,32 @@
       color: rgba(255, 255, 255, 0.65);
       margin-top: 0.4rem;
       text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .slide__scientific:hover {
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-color: rgba(255, 255, 255, 0.35);
+    }
+
+    /* ── iNaturalist attribution ──────────────────────────── */
+
+    .attribution {
+      position: fixed;
+      bottom: 10px;
+      right: 1rem;
+      font-size: 0.6rem;
+      color: rgba(255, 255, 255, 0.22);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      z-index: 10;
+      text-decoration: none;
+    }
+
+    .attribution:hover {
+      color: rgba(255, 255, 255, 0.5);
     }
 
     .slide__detection-count {
@@ -230,7 +256,10 @@
       <div class="slide__info">
         <div class="slide__names">
           <div class="slide__common">{{ sp.common_name }}</div>
-          <div class="slide__scientific">{{ sp.scientific_name }}</div>
+          <a class="slide__scientific"
+             href="https://www.inaturalist.org/taxa/search?q={{ sp.scientific_name | replace(' ', '+') }}"
+             target="_blank"
+             rel="noopener noreferrer">{{ sp.scientific_name }}</a>
           <div class="slide__detection-count">
             {%- if sp.detection_count == 1 %}detected once today
             {%- else %}detected {{ sp.detection_count }} times today
@@ -248,6 +277,11 @@
   </div>
 
   <div class="progress" id="progress"></div>
+
+  <a class="attribution"
+     href="https://www.inaturalist.org"
+     target="_blank"
+     rel="noopener noreferrer">Photos via iNaturalist</a>
 
   <script>
     (function () {
