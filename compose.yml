@@ -10,7 +10,7 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=${PORT:-8090}"
-      - "homepage.group=Services"
+      - "homepage.group=Applications"
       - "homepage.name=Birdhouse"
       - "homepage.icon=mdi-bird"
       - "homepage.href=https://${SERVICE_HOST}"
