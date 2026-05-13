@@ -2,6 +2,8 @@
 
 A single-page public display showing every unique bird species detected today by BirdNET-Go, in order of first detection. Designed to be readable at a distance — wall-mounted TV, monitor across a room, or a browser.
 
+**Stack:** Python, managed by `uv`. Follows the same project layout and deployment pattern as BlueBirdNET.
+
 Live at: `https://birdhouse.sgc.rayandhon.com`
 
 ---
