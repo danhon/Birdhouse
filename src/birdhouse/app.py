@@ -70,7 +70,12 @@ class Species:
 # ---------------------------------------------------------------------------
 
 def fetch_detections_for_date(base_url: str, date_str: str, session: requests.Session) -> list[dict]:
-    """Fetch all detections for date_str (YYYY-MM-DD), paginating as needed."""
+    """Fetch all detections for date_str (YYYY-MM-DD), paginating as needed.
+
+    The API `date` parameter behaves as a start-date rather than an exact
+    filter, so we filter each page client-side and stop paginating as soon
+    as a page contains no records matching date_str.
+    """
     detections: list[dict] = []
     limit = 200
     offset = 0
@@ -87,14 +92,21 @@ def fetch_detections_for_date(base_url: str, date_str: str, session: requests.Se
 
         data = resp.json()
         page = data.get("data") or []
-        detections.extend(page)
+
+        # Keep only records that belong to date_str
+        page_for_date = [d for d in page if d.get("date") == date_str]
+        detections.extend(page_for_date)
 
         total_pages = data.get("total_pages", 1)
         current_page = data.get("current_page", 1)
-        if current_page >= total_pages or not page:
+
+        # Stop if we've exhausted pages, got an empty page, or slipped past
+        # the target date (records from a different day appeared on this page)
+        if current_page >= total_pages or not page or not page_for_date:
             break
         offset += limit
 
+    log.info("Fetched %d detections for %s", len(detections), date_str)
     return detections
 
 
