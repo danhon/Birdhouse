@@ -207,6 +207,12 @@
       width: 0%;
     }
 
+    /* ── Click-to-advance ────────────────────────────────── */
+
+    .carousel {
+      cursor: pointer;
+    }
+
     /* ── Empty state ──────────────────────────────────────── */
 
     .empty {
@@ -285,12 +291,15 @@
 
   <script>
     (function () {
-      const SLIDE_MS = {{ slide_duration * 1000 }};
-      const slides = Array.from(document.querySelectorAll('.slide'));
-      const progress = document.getElementById('progress');
-      let current = 0;
-      let startTime = null;
-      let raf = null;
+      const SLIDE_MS   = {{ slide_duration * 1000 }};
+      const POLL_MS    = {{ poll_interval * 1000 }};
+      const slides     = Array.from(document.querySelectorAll('.slide'));
+      const progress   = document.getElementById('progress');
+      const carousel   = document.getElementById('carousel');
+      let current      = 0;
+      let startTime    = null;
+
+      // ── Carousel ──────────────────────────────────────────
 
       function showSlide(index) {
         slides[current].classList.remove('active');
@@ -302,20 +311,39 @@
       function tick(ts) {
         if (!startTime) startTime = ts;
         const elapsed = ts - startTime;
-        const pct = Math.min(elapsed / SLIDE_MS * 100, 100);
-        progress.style.width = pct + '%';
-
-        if (elapsed >= SLIDE_MS) {
-          showSlide(current + 1);
-        }
-        raf = requestAnimationFrame(tick);
+        progress.style.width = Math.min(elapsed / SLIDE_MS * 100, 100) + '%';
+        if (elapsed >= SLIDE_MS) showSlide(current + 1);
+        requestAnimationFrame(tick);
       }
 
-      // Start after first slide is visible
-      if (slides.length > 1) {
+      if (slides.length > 0) {
         startTime = performance.now();
-        raf = requestAnimationFrame(tick);
+        requestAnimationFrame(tick);
       }
+
+      // Click / tap to advance (ignore clicks on links)
+      carousel.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        showSlide(current + 1);
+      });
+
+      // ── Live data polling ──────────────────────────────────
+
+      const initDateLabel     = {{ date_label | tojson }};
+      const initSpeciesCount  = {{ species | length }};
+
+      function pollData() {
+        fetch('/data.json')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.date_label !== initDateLabel || d.species_count !== initSpeciesCount) {
+              location.reload();
+            }
+          })
+          .catch(function () { /* ignore network hiccups */ });
+      }
+
+      setInterval(pollData, POLL_MS);
     })();
   </script>
 

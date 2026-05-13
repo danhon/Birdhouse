@@ -95,3 +95,42 @@ class TestIndexRoute:
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
                              image_path=None)])
         assert b"slide__no-photo" in client.get("/").data
+
+
+# ---------------------------------------------------------------------------
+# Route: /data.json
+# ---------------------------------------------------------------------------
+
+class TestDataJsonRoute:
+    def test_returns_200(self, client):
+        assert client.get("/data.json").status_code == 200
+
+    def test_returns_json(self, client):
+        resp = client.get("/data.json")
+        assert resp.content_type == "application/json"
+
+    def test_empty_store(self, client):
+        data = client.get("/data.json").get_json()
+        assert data["species_count"] == 0
+        assert data["date_label"] == ""
+
+    def test_species_count(self, client):
+        _load_store([
+            Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3),
+            Species("House Finch",   "Haemorhous mexicanus",  "9:00 am", 7),
+        ])
+        data = client.get("/data.json").get_json()
+        assert data["species_count"] == 2
+
+    def test_date_label(self, client):
+        _load_store(
+            [Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)],
+            date_label="Wednesday 13 May 2026",
+        )
+        data = client.get("/data.json").get_json()
+        assert data["date_label"] == "Wednesday 13 May 2026"
+
+    def test_last_updated_present(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
+        data = client.get("/data.json").get_json()
+        assert "last_updated" in data

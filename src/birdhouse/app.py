@@ -21,7 +21,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, jsonify, render_template, send_from_directory
 
 log = logging.getLogger(__name__)
 
@@ -350,7 +350,17 @@ def create_app(config: Optional[Config] = None) -> Flask:
             date_label=date_label,
             last_updated=last_updated,
             slide_duration=cfg.slide_duration,
+            poll_interval=cfg.poll_interval,
         )
+
+    @app.route("/data.json")
+    def data_json():
+        species, date_label, last_updated = _store.snapshot()
+        return jsonify({
+            "date_label": date_label,
+            "species_count": len(species),
+            "last_updated": last_updated,
+        })
 
     @app.route("/images/<path:filename>")
     def images(filename: str):
