@@ -1,73 +1,58 @@
 # Birdhouse
 
-A single-page public display showing every unique bird species detected today by BirdNET-Go, in order of first detection. Designed to be readable at a distance — wall-mounted TV, monitor across a room, or a browser.
+A full-bleed bird species carousel showing every unique species detected today by BirdNET-Go, in order of first detection. Designed to be readable at a distance — wall-mounted TV, monitor across a room, or a phone.
 
-**Stack:** Python, managed by `uv`. Follows the same project layout and deployment pattern as BlueBirdNET.
-
-Live at: `https://birdhouse.sgc.rayandhon.com`
+Live at: `https://birdhouse.sgc.rayandhon.com` (public, no authentication)
 
 ---
 
 ## What it does
 
-- Polls the BirdNET-Go REST API for today's detections every 60 seconds
-- Shows each unique species once, ordered by the time it was first detected today
-- Displays a representative species photo (from iNaturalist), common name, scientific name, and first-seen time
-- Auto-refreshes the page every 60 seconds — no JavaScript framework needed
+- Queries the BirdNET-Go SQLite database directly every 60 seconds
+- Shows each unique species once, ordered by first detection time today
+- Displays a full-bleed species photo (from iNaturalist, cached to disk), common name, scientific name, first-seen time, last-seen time, and detection count
+- Automatically reloads when a new species appears or the date rolls over
+- Responsive layout for both large displays and mobile portrait
 
 ---
 
 ## Architecture
 
 ```
-BirdNET-Go API ──poll every 60s──► Birdhouse (Flask)
-                                        │
-                     iNaturalist API ───┤ (one-time per species, cached to disk)
-                                        │
-                              Browser ◄─┘ (server-rendered HTML, meta-refresh)
+BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
+                                              │
+                       iNaturalist API ───────┤ (once per species, cached to disk)
+                       (photo + common name)  │
+                                              │
+                                    Browser ◄─┘ (server-rendered HTML + JS polling)
 ```
 
 ### Data flow
 
-1. On each page request (or background refresh), fetch `GET /api/v2/detections?date=YYYY-MM-DD&limit=200` from BirdNET-Go, paginating if `total_pages > 1`.
-2. Filter to detections at or above `MIN_CONFIDENCE` (default 0.6).
-3. Group by `scientificName`; keep the **earliest** `time` per species.
-4. Sort ascending by first-detection time — this is the display order.
-5. For each species, look up a photo from the iNaturalist API (`GET https://api.inaturalist.org/v1/taxa?q={scientific_name}&rank=species`), using `results[0].default_photo.medium_url`. Cache to disk by scientific name.
-6. Render the Jinja2 template and return HTML with `<meta http-equiv="refresh" content="60">`.
+1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
+2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending.
+3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name)`.
+4. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
+5. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
+6. `GET /` renders `index.html` with the current store snapshot.
+7. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
+8. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
 
-**"Today"** = calendar date in ubuntuplex's local timezone, derived from `TZ` env var (`America/Los_Angeles`).
+**"Today"** = calendar date in the timezone set by `TZ` env var.
 
 ---
 
 ## Page layout
 
-This is an **art piece, not a dashboard.** The bird photo is the whole page. Text is minimal and subordinate to the image.
+Full-bleed photo carousel. Each slide:
 
-```
-┌──────────────────────────────────────────────────────┐
-│                                                      │
-│                                                      │
-│           [full-bleed species photo]                 │
-│                                                      │
-│                                                      │
-│                                                      │
-│  American Crow                            5:24 pm   │
-│  Corvus brachyrhynchos          3 of 14 today  ›    │
-└──────────────────────────────────────────────────────┘
-```
-
-- **Photo**: full-bleed, fills the entire viewport. `object-fit: cover`. No borders, no padding.
-- **Overlay**: a subtle gradient at the bottom — transparent at top, dark at bottom — so text is legible over any photo without obscuring the image.
-- **Text** (bottom of screen, over gradient):
-  - Common name: large, bold, white (~3rem)
-  - Scientific name: italic, muted (~1.2rem)
-  - First-seen time: right-aligned, muted
-  - "N of M today" species counter: right-aligned, muted
-- **Carousel**: advances automatically every ~8 seconds through all species detected today, in first-detection order. Pure CSS or minimal vanilla JS — no framework.
-- **No chrome** — no header, no nav bar, no visible UI. The page *is* the bird.
-- **Colour scheme**: photo dominates; text rendered white with a text-shadow for legibility on any background photo.
-- **Typography**: system-ui or Inter, generous letter-spacing on the common name.
+- Photo fills the entire viewport (`object-fit: cover`)
+- Bottom gradient overlay for text legibility
+- Bottom-left: common name (large serif), scientific name (italic, links to iNaturalist), detection count + last seen time
+- Bottom-right: first-seen time, slide counter ("3 of 12")
+- Top strip: date (left), species count (right)
+- Progress bar along the bottom edge
+- Click or tap anywhere to advance; swipe left/right on mobile
 
 ---
 
@@ -75,164 +60,84 @@ This is an **art piece, not a dashboard.** The bird photo is the whole page. Tex
 
 ```
 Birdhouse/
-├── PROJECT.md               ← this file
+├── PROJECT.md
 ├── pyproject.toml
-├── config.example.env
+├── uv.lock
+├── Dockerfile
+├── compose.yml
+├── Makefile
+├── .env.example             ← all config vars documented; commit this
+├── .gitignore               ← .env, data/, image-cache/ gitignored
 ├── src/
 │   └── birdhouse/
-│       ├── __init__.py
-│       ├── app.py           ← Flask app: polling, image cache, route
+│       ├── app.py           ← Flask app, DB query, image cache, polling
 │       └── templates/
-│           └── index.html   ← Jinja2 template
-├── data/
-│   └── image-cache/         ← cached species photos (gitignored)
+│           └── index.html   ← carousel template
+├── tests/
+│   ├── test_db.py
+│   ├── test_app.py
+│   ├── test_detections.py
+│   └── test_image_cache.py
 └── systemd/
-    └── birdhouse.service    ← systemd user unit template
+    └── birdhouse.service    ← legacy; superseded by Docker Compose
 ```
 
 ---
 
 ## Configuration
 
-Copy `config.example.env` to `config.env` (or `~/.config/birdhouse/env` for systemd) and edit:
+Copy `.env.example` to `.env` and fill in values. All variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BIRDNET_BASE_URL` | `http://192.168.1.100:8888` | BirdNET-Go API base |
-| `PORT` | `8090` | Port Birdhouse listens on |
-| `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to include |
-| `IMAGE_CACHE_DIR` | `data/image-cache` | Directory for cached species photos |
-| `TZ` | `America/Los_Angeles` | Timezone for determining "today" |
-| `POLL_INTERVAL` | `60` | Seconds between background data refreshes |
-
----
-
-## Ports in use on ubuntuplex (reference)
-
-| Port | Service |
-|---|---|
-| 80 / 443 | Traefik |
-| 8213 | Buywanderbot |
-| 8581 | Homebridge |
-| 8787 | BirdNET Analytics |
-| 8888 | BirdNET-Go |
-| 9080 | Pi-hole |
-| 9091 | Authelia |
-| 11080 | Scrypted |
-| 61208 | Glances |
-| **8090** | **Birdhouse ← assigned** |
+| `BIRDNET_BASE_URL` | `http://192.168.1.100:8888` | BirdNET-Go API (for common name seeding) |
+| `BIRDNET_DB_HOST_PATH` | — | **Host** path to BirdNET-Go SQLite DB (Docker mount source) |
+| `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
+| `PORT` | `8090` | Port the app listens on |
+| `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to display |
+| `IMAGE_CACHE_DIR` | `/app/data/image-cache` | Species photo cache (backed by Docker volume) |
+| `TZ` | `America/Los_Angeles` | Timezone for "today" |
+| `POLL_INTERVAL` | `60` | Seconds between DB refreshes |
+| `SLIDE_DURATION` | `8` | Seconds per carousel slide |
+| `SERVICE_HOST` | `birdhouse.sgc.rayandhon.com` | Traefik routing hostname (set by Makefile) |
 
 ---
 
 ## Deployment
 
-### 1. Clone and install
+Birdhouse runs as a Docker Compose stack on ubuntuplex, discovered by Traefik via container labels.
 
 ```bash
-git clone <repo> ~/dev/Birdhouse
-cd ~/dev/Birdhouse
-~/.local/bin/uv sync
+# First time
+cp .env.example .env
+nano .env   # fill in BIRDNET_DB_HOST_PATH and other values
+
+# Deploy (build image and start)
+make deploy
+
+# View logs
+make logs
+
+# Preview a branch at birdhouse-preview.sgc.rayandhon.com
+make preview
 ```
 
-### 2. Configure
+See [python-apps.md](../reverse-proxy/docs-site/docs/services/python-apps.md) for the full pattern.
+
+---
+
+## Development
 
 ```bash
-mkdir -p ~/.config/birdhouse
-cp config.example.env ~/.config/birdhouse/env
-nano ~/.config/birdhouse/env
-```
-
-### 3. Systemd user service
-
-Copy or symlink `systemd/birdhouse.service` to `~/.config/systemd/user/birdhouse.service`, then:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now birdhouse
-journalctl --user -u birdhouse -f
-```
-
-### 4. Traefik route
-
-Create `~/dev/reverse-proxy/traefik/dynamic/birdhouse.yml`:
-
-```yaml
-http:
-  routers:
-    birdhouse:
-      rule: Host(`birdhouse.sgc.rayandhon.com`)
-      entrypoints: [websecure]
-      tls:
-        certResolver: le
-      service: birdhouse
-      middlewares: [authelia@file]
-
-  services:
-    birdhouse:
-      loadBalancer:
-        servers:
-          - url: http://host.docker.internal:8090
-```
-
-Traefik hot-reloads — no restart needed.
-
-### 5. Verify
-
-```bash
-curl http://localhost:8090/          # should return HTML
-dig @127.0.0.1 birdhouse.sgc.rayandhon.com  # should resolve to 192.168.1.100
+uv sync
+uv run pytest           # run tests
+uv run birdhouse        # run locally (reads from .env or env vars)
 ```
 
 ---
 
-## Image source
+## Image and common name sources
 
-Photos come from the **iNaturalist API** — free, no authentication required.
+**Photos:** iNaturalist taxa API — `results[0].default_photo.large_url`. Cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg`. Falls back to a dark background if unavailable.
 
-Request:
-```
-GET https://api.inaturalist.org/v1/taxa?q={scientific_name}&rank=species&per_page=1
-```
-
-Response field used: `results[0].default_photo.large_url` (prefer `large_url` over `medium_url` — photos fill the full viewport so resolution matters).
-
-Photos are cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg` on first fetch. If iNaturalist returns no result or the request fails, the slide shows a dark background with the text overlay only — no broken image icons.
-
----
-
-## Out of scope (for now)
-
-- History / previous-day pages
-- Detection count per species
-- Audio spectrograms
-- Manually-verified-only filter
-- Mobile-optimised layout
-- Authentication (add `authelia@file` middleware if wanted; omit if you want it open)
-
----
-
-## Implementation plan
-
-### Phase 1 — Core app
-
-- [ ] `pyproject.toml` with Flask + python-dateutil dependencies
-- [ ] `src/birdhouse/app.py`:
-  - BirdNET-Go polling: fetch today's detections, paginate, dedupe by scientific name, sort by first detection
-  - iNaturalist image fetch + disk cache
-  - Flask route `/` → render template
-  - Background thread refreshing data every `POLL_INTERVAL` seconds
-- [ ] `src/birdhouse/templates/index.html`: dark-background display layout
-- [ ] `config.example.env`
-
-### Phase 2 — Deployment
-
-- [ ] `systemd/birdhouse.service` unit file
-- [ ] `traefik/dynamic/birdhouse.yml` route in reverse-proxy repo
-- [ ] `.gitignore` (data/, image-cache/, .venv/, config.env)
-- [ ] Deploy to ubuntuplex and smoke-test
-
-### Phase 3 — Polish
-
-- [ ] Graceful handling of BirdNET-Go being unreachable (show last known data + "last updated" timestamp)
-- [ ] Placeholder silhouette image when iNaturalist returns nothing
-- [ ] README with setup instructions
+**Common names:** BirdNET-Go REST API (`/api/v2/detections?limit=200`), seeded on first encounter. iNaturalist `preferred_common_name` used as fallback when BirdNET-Go doesn't have a name (e.g. rarer species not in the last 200 detections). Falls back to scientific name if neither source has it.
