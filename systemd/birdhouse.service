@@ -1,0 +1,14 @@
+[Unit]
+Description=Birdhouse (BirdNET-Go species carousel)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dev/Birdhouse
+EnvironmentFile=%h/.config/birdhouse/env
+ExecStart=%h/.local/bin/uv run --project %h/dev/Birdhouse birdhouse
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

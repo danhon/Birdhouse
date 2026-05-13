@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Birdhouse</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: #111;
+      color: #fff;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── Carousel ─────────────────────────────────────────── */
+
+    .carousel {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 0.8s ease-in-out;
+    }
+
+    .slide.active {
+      opacity: 1;
+    }
+
+    /* ── Photo ────────────────────────────────────────────── */
+
+    .slide__photo {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .slide__no-photo {
+      position: absolute;
+      inset: 0;
+      background: #1a1a2e;
+    }
+
+    /* ── Gradient overlay ─────────────────────────────────── */
+
+    .slide__gradient {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        to bottom,
+        transparent 40%,
+        rgba(0, 0, 0, 0.25) 60%,
+        rgba(0, 0, 0, 0.75) 85%,
+        rgba(0, 0, 0, 0.90) 100%
+      );
+    }
+
+    /* ── Text overlay ─────────────────────────────────────── */
+
+    .slide__info {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 2rem 3rem 2.5rem;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 2rem;
+    }
+
+    .slide__names {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .slide__common {
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+      text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .slide__scientific {
+      font-size: clamp(0.9rem, 1.8vw, 1.2rem);
+      font-style: italic;
+      color: rgba(255, 255, 255, 0.65);
+      margin-top: 0.3rem;
+      text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+    }
+
+    .slide__meta {
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    .slide__time {
+      font-size: clamp(1rem, 1.8vw, 1.3rem);
+      color: rgba(255, 255, 255, 0.75);
+      text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+      white-space: nowrap;
+    }
+
+    .slide__counter {
+      font-size: clamp(0.8rem, 1.4vw, 1rem);
+      color: rgba(255, 255, 255, 0.45);
+      margin-top: 0.3rem;
+      white-space: nowrap;
+    }
+
+    /* ── Header strip (date + count) ──────────────────────── */
+
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 1.5rem 3rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 10;
+      background: linear-gradient(
+        to bottom,
+        rgba(0,0,0,0.55) 0%,
+        transparent 100%
+      );
+    }
+
+    .header__date {
+      font-size: clamp(0.85rem, 1.5vw, 1rem);
+      color: rgba(255,255,255,0.6);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .header__count {
+      font-size: clamp(0.85rem, 1.5vw, 1rem);
+      color: rgba(255,255,255,0.6);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* ── Progress bar ─────────────────────────────────────── */
+
+    .progress {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.5);
+      z-index: 10;
+      width: 0%;
+    }
+
+    /* ── Empty state ──────────────────────────────────────── */
+
+    .empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      flex-direction: column;
+      gap: 1rem;
+      color: rgba(255,255,255,0.4);
+    }
+
+    .empty__title {
+      font-size: 2rem;
+      font-weight: 300;
+    }
+
+    .empty__sub {
+      font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+{% if species %}
+
+  <div class="header">
+    <span class="header__date">{{ date_label }}</span>
+    <span class="header__count">{{ species|length }} species today</span>
+  </div>
+
+  <div class="carousel" id="carousel">
+    {% for sp in species %}
+    <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}">
+
+      {% if sp.image_path %}
+        <img class="slide__photo"
+             src="/images/{{ sp.image_path }}"
+             alt="{{ sp.common_name }}"
+             draggable="false">
+      {% else %}
+        <div class="slide__no-photo"></div>
+      {% endif %}
+
+      <div class="slide__gradient"></div>
+
+      <div class="slide__info">
+        <div class="slide__names">
+          <div class="slide__common">{{ sp.common_name }}</div>
+          <div class="slide__scientific">{{ sp.scientific_name }}</div>
+        </div>
+        <div class="slide__meta">
+          <div class="slide__time">{{ sp.first_seen }}</div>
+          <div class="slide__counter">{{ loop.index }} of {{ species|length }}</div>
+        </div>
+      </div>
+
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="progress" id="progress"></div>
+
+  <script>
+    (function () {
+      const SLIDE_MS = {{ slide_duration * 1000 }};
+      const slides = Array.from(document.querySelectorAll('.slide'));
+      const progress = document.getElementById('progress');
+      let current = 0;
+      let startTime = null;
+      let raf = null;
+
+      function showSlide(index) {
+        slides[current].classList.remove('active');
+        current = (index + slides.length) % slides.length;
+        slides[current].classList.add('active');
+        startTime = performance.now();
+      }
+
+      function tick(ts) {
+        if (!startTime) startTime = ts;
+        const elapsed = ts - startTime;
+        const pct = Math.min(elapsed / SLIDE_MS * 100, 100);
+        progress.style.width = pct + '%';
+
+        if (elapsed >= SLIDE_MS) {
+          showSlide(current + 1);
+        }
+        raf = requestAnimationFrame(tick);
+      }
+
+      // Start after first slide is visible
+      if (slides.length > 1) {
+        startTime = performance.now();
+        raf = requestAnimationFrame(tick);
+      }
+    })();
+  </script>
+
+{% else %}
+
+  <div class="empty">
+    <div class="empty__title">No birds yet today</div>
+    <div class="empty__sub">{{ date_label }} · checking again soon</div>
+  </div>
+
+{% endif %}
+
+</body>
+</html>
