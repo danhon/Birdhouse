@@ -1,20 +1,20 @@
 """Tests for the Flask app routes."""
 
 import pytest
-from unittest.mock import patch
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 from birdhouse.app import Config, DataStore, Species, create_app
-from pathlib import Path
+import birdhouse.app as app_module
 
 
 @pytest.fixture
 def config(tmp_path):
     return Config(
         birdnet_base_url="http://localhost:8888",
+        birdnet_db_path=tmp_path / "birdnet.db",
         port=8090,
         min_confidence=0.6,
-        image_cache_dir=tmp_path / "images",
         timezone=ZoneInfo("America/Los_Angeles"),
         poll_interval=60,
         slide_duration=8,
@@ -32,124 +32,65 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture(autouse=True)
+def reset_store():
+    """Reset the global store before each test."""
+    app_module._store.update([], "", "")
+    yield
+    app_module._store.update([], "", "")
+
+
+def _load_store(species_list, date_label="Monday 12 May 2026"):
+    app_module._store.update(species_list, date_label, "8:05 am")
+
+
 # ---------------------------------------------------------------------------
 # Route: /
 # ---------------------------------------------------------------------------
 
 class TestIndexRoute:
     def test_returns_200(self, client):
-        response = client.get("/")
-        assert response.status_code == 200
+        assert client.get("/").status_code == 200
 
     def test_empty_state_shows_no_birds_message(self, client):
-        response = client.get("/")
-        assert b"No birds yet today" in response.data
+        assert b"No birds yet today" in client.get("/").data
 
-    def test_species_rendered_when_store_has_data(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[
-                Species("American Crow", "Corvus brachyrhynchos", "8:00 am"),
-                Species("House Finch", "Haemorhous mexicanus", "9:00 am"),
-            ],
-            date_label="Monday 12 May 2026",
-            last_updated="9:05 am",
-        )
-        response = client.get("/")
-        assert b"American Crow" in response.data
-        assert b"Corvus brachyrhynchos" in response.data
-        assert b"House Finch" in response.data
-        assert b"2 species today" in response.data
+    def test_species_name_rendered(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 5)])
+        data = client.get("/").data
+        assert b"American Crow" in data
+        assert b"Corvus brachyrhynchos" in data
 
-        # Reset store
-        app_module._store.update([], "", "")
+    def test_species_count_in_header(self, client):
+        _load_store([
+            Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3),
+            Species("House Finch",   "Haemorhous mexicanus",  "9:00 am", 7),
+        ])
+        assert b"2 species today" in client.get("/").data
 
-    def test_date_label_in_response(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am")],
-            date_label="Tuesday 13 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        assert b"Tuesday 13 May 2026" in response.data
-        app_module._store.update([], "", "")
+    def test_date_label_rendered(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)],
+                    date_label="Tuesday 13 May 2026")
+        assert b"Tuesday 13 May 2026" in client.get("/").data
 
-    def test_slide_duration_in_response(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am")],
-            date_label="Monday 12 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        # slide_duration=8 → 8000ms in JS
-        assert b"8000" in response.data
-        app_module._store.update([], "", "")
-
-    def test_image_tag_rendered_when_image_path_set(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[
-                Species("American Crow", "Corvus brachyrhynchos", "8:00 am",
-                        detection_count=3, image_path="Corvus_brachyrhynchos.jpg"),
-            ],
-            date_label="Monday 12 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        assert b'src="/images/Corvus_brachyrhynchos.jpg"' in response.data
-        app_module._store.update([], "", "")
+    def test_slide_duration_in_js(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
+        assert b"8000" in client.get("/").data
 
     def test_detection_count_plural(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am", detection_count=5)],
-            date_label="Monday 12 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        assert b"detected 5 times today" in response.data
-        app_module._store.update([], "", "")
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 5)])
+        assert b"detected 5 times today" in client.get("/").data
 
     def test_detection_count_singular(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am", detection_count=1)],
-            date_label="Monday 12 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        assert b"detected once today" in response.data
-        app_module._store.update([], "", "")
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
+        assert b"detected once today" in client.get("/").data
 
-    def test_no_image_tag_when_image_path_none(self, client):
-        import birdhouse.app as app_module
-        app_module._store.update(
-            species=[Species("American Crow", "Corvus brachyrhynchos", "8:00 am", image_path=None)],
-            date_label="Monday 12 May 2026",
-            last_updated="8:05 am",
-        )
-        response = client.get("/")
-        assert b'slide__no-photo' in response.data
-        app_module._store.update([], "", "")
+    def test_image_url_rendered_when_set(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             image_url="https://example.com/crow.jpg")])
+        assert b'src="https://example.com/crow.jpg"' in client.get("/").data
 
-
-# ---------------------------------------------------------------------------
-# Route: /images/<filename>
-# ---------------------------------------------------------------------------
-
-class TestImagesRoute:
-    def test_serves_cached_image(self, client, config):
-        config.image_cache_dir.mkdir(parents=True, exist_ok=True)
-        img = config.image_cache_dir / "test_bird.jpg"
-        img.write_bytes(b"\xff\xd8\xff")  # minimal JPEG
-
-        response = client.get("/images/test_bird.jpg")
-        assert response.status_code == 200
-        assert response.data == b"\xff\xd8\xff"
-
-    def test_404_for_missing_image(self, client, config):
-        config.image_cache_dir.mkdir(parents=True, exist_ok=True)
-        response = client.get("/images/nonexistent.jpg")
-        assert response.status_code == 404
+    def test_no_photo_placeholder_when_no_image(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             image_url=None)])
+        assert b"slide__no-photo" in client.get("/").data

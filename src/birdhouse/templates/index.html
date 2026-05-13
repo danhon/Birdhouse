@@ -216,9 +216,9 @@
     {% for sp in species %}
     <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}">
 
-      {% if sp.image_path %}
+      {% if sp.image_url %}
         <img class="slide__photo"
-             src="/images/{{ sp.image_path }}"
+             src="{{ sp.image_url }}"
              alt="{{ sp.common_name }}"
              draggable="false">
       {% else %}

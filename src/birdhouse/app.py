@@ -1,16 +1,15 @@
 """
 Birdhouse — full-bleed bird species carousel from BirdNET-Go detections.
 
-Polls the BirdNET-Go REST API for today's detections, deduplicates by species,
-fetches representative photos from iNaturalist, and serves a single-page
-auto-advancing carousel.
+Queries the BirdNET-Go SQLite database directly for accurate per-day counts
+and first-detection times. Uses BirdNET-Go's own image_caches table for
+species photos. Fetches common names from the BirdNET-Go REST API.
 """
 
 from __future__ import annotations
 
 import logging
-import os
-import re
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
@@ -20,7 +19,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 import requests
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, render_template
 
 log = logging.getLogger(__name__)
 
@@ -32,20 +31,21 @@ log = logging.getLogger(__name__)
 @dataclass
 class Config:
     birdnet_base_url: str
+    birdnet_db_path: Path
     port: int
     min_confidence: float
-    image_cache_dir: Path
     timezone: ZoneInfo
     poll_interval: int
     slide_duration: int
 
     @classmethod
     def from_env(cls) -> "Config":
+        import os
         return cls(
             birdnet_base_url=os.environ.get("BIRDNET_BASE_URL", "http://192.168.1.100:8888").rstrip("/"),
+            birdnet_db_path=Path(os.environ.get("BIRDNET_DB_PATH", "/home/danhon/birdnet-go-app/data/birdnet.db")),
             port=int(os.environ.get("PORT", "8090")),
             min_confidence=float(os.environ.get("MIN_CONFIDENCE", "0.6")),
-            image_cache_dir=Path(os.environ.get("IMAGE_CACHE_DIR", "data/image-cache")),
             timezone=ZoneInfo(os.environ.get("TZ", "America/Los_Angeles")),
             poll_interval=int(os.environ.get("POLL_INTERVAL", "60")),
             slide_duration=int(os.environ.get("SLIDE_DURATION", "8")),
@@ -60,183 +60,151 @@ class Config:
 class Species:
     common_name: str
     scientific_name: str
-    first_seen: str       # "HH:MM" local time
+    first_seen: str        # "5:24 pm" local time
     detection_count: int = 0
-    image_path: Optional[str] = None   # relative path served at /images/<filename>
+    image_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# BirdNET-Go client
+# BirdNET-Go database
 # ---------------------------------------------------------------------------
 
-def fetch_detections_for_date(base_url: str, date_str: str, session: requests.Session) -> list[dict]:
-    """Fetch all detections for date_str (YYYY-MM-DD), paginating as needed.
-
-    The API `date` parameter behaves as a start-date rather than an exact
-    filter, so we filter each page client-side and stop paginating as soon
-    as a page contains no records matching date_str.
-    """
-    detections: list[dict] = []
-    limit = 200
-    offset = 0
-
-    while True:
-        url = f"{base_url}/api/v2/detections"
-        params = {"date": date_str, "limit": limit, "offset": offset}
-        try:
-            resp = session.get(url, params=params, timeout=10)
-            resp.raise_for_status()
-        except requests.RequestException as exc:
-            log.error("BirdNET-Go request failed: %s", exc)
-            break
-
-        data = resp.json()
-        page = data.get("data") or []
-
-        # Keep only records that belong to date_str
-        page_for_date = [d for d in page if d.get("date") == date_str]
-        detections.extend(page_for_date)
-
-        total_pages = data.get("total_pages", 1)
-        current_page = data.get("current_page", 1)
-
-        # Stop if we've exhausted pages, got an empty page, or slipped past
-        # the target date (records from a different day appeared on this page)
-        if current_page >= total_pages or not page or not page_for_date:
-            break
-        offset += limit
-
-    log.info("Fetched %d detections for %s", len(detections), date_str)
-    return detections
+def _day_bounds(tz: ZoneInfo) -> tuple[int, int]:
+    """Return (start_ts, end_ts) Unix timestamps for today in the given timezone."""
+    now = datetime.now(tz)
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = now.replace(hour=23, minute=59, second=59, microsecond=0)
+    return int(start.timestamp()), int(end.timestamp())
 
 
-def unique_species_from_detections(
-    detections: list[dict],
-    min_confidence: float,
+def query_today_from_db(
+    db_path: Path,
     tz: ZoneInfo,
-) -> list[Species]:
+    min_confidence: float,
+) -> list[tuple[str, int, int]]:
     """
-    Filter by confidence, deduplicate by scientificName, sort by first detection.
-    Returns one Species per unique scientific name, in first-detection order.
+    Query the BirdNET-Go SQLite database for today's species.
+
+    Returns a list of (scientific_name, first_seen_unix_ts, detection_count)
+    sorted by first detection time ascending.
     """
-    earliest: dict[str, dict] = {}  # scientific_name → detection record
-    counts: dict[str, int] = {}    # scientific_name → detection count
-
-    for det in detections:
-        confidence = det.get("confidence") or 0.0
-        if confidence < min_confidence:
-            continue
-
-        sci = (det.get("scientificName") or "").strip()
-        if not sci:
-            continue
-
-        counts[sci] = counts.get(sci, 0) + 1
-
-        if sci not in earliest:
-            earliest[sci] = det
-        else:
-            # Keep whichever has the earlier timestamp
-            if det.get("timestamp", "") < earliest[sci].get("timestamp", ""):
-                earliest[sci] = det
-
-    result = []
-    for det in sorted(earliest.values(), key=lambda d: d.get("timestamp", "")):
-        sci = (det.get("scientificName") or "").strip()
-        common = (det.get("commonName") or sci).strip()
-
-        # Format time as "5:24 pm" in local timezone
-        ts_str = det.get("timestamp") or ""
-        first_seen = _format_time(ts_str, tz)
-
-        result.append(Species(
-            common_name=common,
-            scientific_name=sci,
-            first_seen=first_seen,
-            detection_count=counts.get(sci, 0),
-        ))
-
-    return result
+    ts_start, ts_end = _day_bounds(tz)
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT l.scientific_name,
+                   MIN(d.detected_at) AS first_seen,
+                   COUNT(*)           AS n
+            FROM detections d
+            JOIN labels l ON l.id = d.label_id
+            WHERE d.detected_at BETWEEN ? AND ?
+              AND d.confidence >= ?
+            GROUP BY d.label_id
+            ORDER BY first_seen ASC
+            """,
+            (ts_start, ts_end, min_confidence),
+        ).fetchall()
+        conn.close()
+        return [(r["scientific_name"], r["first_seen"], r["n"]) for r in rows]
+    except Exception as exc:
+        log.error("DB query failed: %s", exc)
+        return []
 
 
-def _format_time(timestamp: str, tz: ZoneInfo) -> str:
-    """Parse an ISO-8601 timestamp and return a friendly local time string."""
-    if not timestamp:
+def get_image_url_from_db(db_path: Path, scientific_name: str) -> Optional[str]:
+    """
+    Return a cached image URL from BirdNET-Go's image_caches table, or None.
+    Prefers avicommons URLs (higher resolution) over Wikimedia when both exist.
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT ic.url
+            FROM image_caches ic
+            JOIN labels l ON l.id = ic.label_id
+            WHERE l.scientific_name = ?
+              AND ic.url IS NOT NULL
+            """,
+            (scientific_name,),
+        ).fetchall()
+        conn.close()
+        if not rows:
+            return None
+        urls = [r["url"] for r in rows]
+        # Prefer avicommons (typically larger/higher quality)
+        for url in urls:
+            if "avicommons" in url:
+                return url
+        return urls[0]
+    except Exception as exc:
+        log.warning("Image URL lookup failed for %s: %s", scientific_name, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Common name cache
+# ---------------------------------------------------------------------------
+
+class CommonNameCache:
+    """
+    Lazy in-memory cache mapping scientific_name → common_name.
+    Populated from the BirdNET-Go REST API (which includes commonName in
+    detection records). Falls back to the scientific name if unknown.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[str, str] = {}
+        self._lock = threading.Lock()
+
+    def get(self, scientific_name: str) -> str:
+        with self._lock:
+            return self._cache.get(scientific_name, scientific_name)
+
+    def seed(self, base_url: str, session: requests.Session) -> None:
+        """Fetch recent detections from the API to populate the name cache."""
+        try:
+            resp = session.get(
+                f"{base_url}/api/v2/detections",
+                params={"limit": 200},
+                timeout=10,
+            )
+            resp.raise_for_status()
+            records = resp.json().get("data") or []
+            with self._lock:
+                for r in records:
+                    sci = (r.get("scientificName") or "").strip()
+                    common = (r.get("commonName") or "").strip()
+                    if sci and common:
+                        self._cache[sci] = common
+            log.info("Common name cache seeded with %d entries", len(self._cache))
+        except Exception as exc:
+            log.warning("Common name cache seed failed: %s", exc)
+
+    def missing(self, scientific_names: list[str]) -> list[str]:
+        with self._lock:
+            return [s for s in scientific_names if s not in self._cache]
+
+
+_name_cache = CommonNameCache()
+
+
+# ---------------------------------------------------------------------------
+# Time formatting
+# ---------------------------------------------------------------------------
+
+def _format_time(unix_ts: int, tz: ZoneInfo) -> str:
+    """Convert a Unix timestamp to a friendly local time string, e.g. '7:24 am'."""
+    try:
+        dt = datetime.fromtimestamp(unix_ts, tz=tz)
+        hour = dt.hour % 12 or 12
+        ampm = "am" if dt.hour < 12 else "pm"
+        return f"{hour}:{dt.minute:02d} {ampm}"
+    except (OSError, OverflowError, ValueError):
         return ""
-    try:
-        dt = datetime.fromisoformat(timestamp)
-        local = dt.astimezone(tz)
-        hour = local.hour % 12 or 12
-        ampm = "am" if local.hour < 12 else "pm"
-        return f"{hour}:{local.minute:02d} {ampm}"
-    except (ValueError, TypeError):
-        return timestamp
-
-
-# ---------------------------------------------------------------------------
-# iNaturalist image cache
-# ---------------------------------------------------------------------------
-
-INATURALIST_API = "https://api.inaturalist.org/v1/taxa"
-_SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_-]")
-
-
-def _safe_filename(scientific_name: str) -> str:
-    return _SAFE_NAME_RE.sub("_", scientific_name) + ".jpg"
-
-
-def fetch_species_image(
-    scientific_name: str,
-    cache_dir: Path,
-    session: requests.Session,
-) -> Optional[str]:
-    """
-    Return the filename (relative to cache_dir) of a cached species photo,
-    fetching from iNaturalist if not already on disk.
-    Returns None if no image is available.
-    """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    filename = _safe_filename(scientific_name)
-    dest = cache_dir / filename
-
-    if dest.exists():
-        return filename
-
-    # Look up taxon on iNaturalist
-    try:
-        resp = session.get(
-            INATURALIST_API,
-            params={"q": scientific_name, "rank": "species", "per_page": 1},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results") or []
-    except requests.RequestException as exc:
-        log.warning("iNaturalist lookup failed for %s: %s", scientific_name, exc)
-        return None
-
-    if not results:
-        log.info("No iNaturalist result for %s", scientific_name)
-        return None
-
-    taxon = results[0]
-    photo = taxon.get("default_photo") or {}
-    image_url = photo.get("large_url") or photo.get("medium_url") or ""
-
-    if not image_url:
-        log.info("No photo URL for %s", scientific_name)
-        return None
-
-    # Download and cache
-    try:
-        img_resp = session.get(image_url, timeout=20)
-        img_resp.raise_for_status()
-        dest.write_bytes(img_resp.content)
-        log.info("Cached image for %s → %s", scientific_name, filename)
-        return filename
-    except requests.RequestException as exc:
-        log.warning("Image download failed for %s: %s", scientific_name, exc)
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +214,7 @@ def fetch_species_image(
 @dataclass
 class DataStore:
     species: list[Species] = field(default_factory=list)
-    date_label: str = ""          # e.g. "Tuesday 13 May 2026"
+    date_label: str = ""
     last_updated: str = ""
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -268,29 +236,37 @@ _store = DataStore()
 # Background poller
 # ---------------------------------------------------------------------------
 
-def _today_str(tz: ZoneInfo) -> str:
-    return datetime.now(tz).strftime("%Y-%m-%d")
-
-
 def _date_label(tz: ZoneInfo) -> str:
     return datetime.now(tz).strftime("%A %-d %B %Y")
 
 
 def _refresh(config: Config, http: requests.Session) -> None:
-    """Fetch today's data and update the store."""
-    date_str = _today_str(config.timezone)
-    log.info("Refreshing detections for %s", date_str)
+    """Fetch today's data from the DB and update the store."""
+    log.info("Refreshing from DB: %s", config.birdnet_db_path)
 
-    detections = fetch_detections_for_date(config.birdnet_base_url, date_str, http)
-    species_list = unique_species_from_detections(detections, config.min_confidence, config.timezone)
+    rows = query_today_from_db(config.birdnet_db_path, config.timezone, config.min_confidence)
+    log.info("DB returned %d unique species", len(rows))
 
-    # Fetch images (blocking; cached after first fetch)
-    for sp in species_list:
-        sp.image_path = fetch_species_image(sp.scientific_name, config.image_cache_dir, http)
+    # Top up the common name cache for any species we haven't seen before
+    unknown = _name_cache.missing([sci for sci, _, _ in rows])
+    if unknown:
+        log.info("Seeding common name cache (missing: %s)", unknown)
+        _name_cache.seed(config.birdnet_base_url, http)
+
+    species_list = []
+    for sci, first_ts, count in rows:
+        image_url = get_image_url_from_db(config.birdnet_db_path, sci)
+        species_list.append(Species(
+            common_name=_name_cache.get(sci),
+            scientific_name=sci,
+            first_seen=_format_time(first_ts, config.timezone),
+            detection_count=count,
+            image_url=image_url,
+        ))
 
     now = datetime.now(config.timezone).strftime("%-I:%M %p")
     _store.update(species_list, _date_label(config.timezone), now)
-    log.info("Store updated: %d unique species", len(species_list))
+    log.info("Store updated: %d species", len(species_list))
 
 
 def start_background_poller(config: Config) -> None:
@@ -332,11 +308,6 @@ def create_app(config: Optional[Config] = None) -> Flask:
             slide_duration=cfg.slide_duration,
         )
 
-    @app.route("/images/<path:filename>")
-    def images(filename: str):
-        cfg = app.config["BIRDHOUSE_CONFIG"]
-        return send_from_directory(cfg.image_cache_dir.resolve(), filename)
-
     return app
 
 
@@ -345,14 +316,13 @@ def create_app(config: Optional[Config] = None) -> Flask:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    import os
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
     config = Config.from_env()
-    config.image_cache_dir.mkdir(parents=True, exist_ok=True)
-
     start_background_poller(config)
     app = create_app(config)
     app.run(host="0.0.0.0", port=config.port, debug=False)
