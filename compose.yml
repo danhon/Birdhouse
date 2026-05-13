@@ -10,6 +10,12 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=${PORT:-8090}"
+      - "homepage.group=Services"
+      - "homepage.name=Birdhouse"
+      - "homepage.icon=mdi-bird"
+      - "homepage.href=https://${SERVICE_HOST}"
+      - "homepage.description=Today's bird detections"
+      - "homepage.instance=my-docker"
     volumes:
       # BirdNET-Go SQLite database (read-only).
       # BIRDNET_DB_HOST_PATH is the path on the host; the app always
