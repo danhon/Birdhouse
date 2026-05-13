@@ -10,10 +10,15 @@ FAKE_IMAGE_URL = "https://static.inaturalist.org/photos/1/large.jpg"
 FAKE_IMAGE_BYTES = b"\xff\xd8\xff"  # minimal JPEG magic bytes
 
 
-def _inat_response(scientific_name: str, image_url: str = FAKE_IMAGE_URL) -> dict:
+def _inat_response(
+    scientific_name: str,
+    image_url: str = FAKE_IMAGE_URL,
+    common_name: str = "Test Bird",
+) -> dict:
     return {
         "results": [{
             "name": scientific_name,
+            "preferred_common_name": common_name,
             "default_photo": {"large_url": image_url, "medium_url": image_url},
         }]
     }
@@ -35,14 +40,15 @@ class TestSafeFilename:
 
 @rsps_lib.activate
 def test_downloads_and_caches_image(tmp_path):
-    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos"))
+    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos", common_name="American Crow"))
     rsps_lib.add(rsps_lib.GET, FAKE_IMAGE_URL, body=FAKE_IMAGE_BYTES, content_type="image/jpeg")
 
-    result = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+    image_path, common_name = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
 
-    assert result is not None
-    assert (tmp_path / result).exists()
-    assert (tmp_path / result).read_bytes() == FAKE_IMAGE_BYTES
+    assert image_path is not None
+    assert (tmp_path / image_path).exists()
+    assert (tmp_path / image_path).read_bytes() == FAKE_IMAGE_BYTES
+    assert common_name == "American Crow"
 
 
 @rsps_lib.activate
@@ -50,28 +56,36 @@ def test_returns_cached_file_without_network(tmp_path):
     filename = _safe_filename("Corvus brachyrhynchos")
     (tmp_path / filename).write_bytes(FAKE_IMAGE_BYTES)
 
-    fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+    image_path, common_name = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
 
     assert len(rsps_lib.calls) == 0
+    assert image_path == filename
+    assert common_name is None   # no API call made, common name unknown
 
 
 @rsps_lib.activate
 def test_returns_none_when_no_inat_result(tmp_path):
     rsps_lib.add(rsps_lib.GET, INAT_URL, json={"results": []})
-    assert fetch_species_image("Unknown species", tmp_path, requests.Session()) is None
+    image_path, common_name = fetch_species_image("Unknown species", tmp_path, requests.Session())
+    assert image_path is None
+    assert common_name is None
 
 
 @rsps_lib.activate
 def test_returns_none_when_inat_request_fails(tmp_path):
     rsps_lib.add(rsps_lib.GET, INAT_URL, body=requests.ConnectionError("network error"))
-    assert fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session()) is None
+    image_path, common_name = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+    assert image_path is None
+    assert common_name is None
 
 
 @rsps_lib.activate
-def test_returns_none_when_image_download_fails(tmp_path):
-    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos"))
+def test_returns_none_image_but_common_name_when_download_fails(tmp_path):
+    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos", common_name="American Crow"))
     rsps_lib.add(rsps_lib.GET, FAKE_IMAGE_URL, status=503)
-    assert fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session()) is None
+    image_path, common_name = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+    assert image_path is None
+    assert common_name == "American Crow"   # name still returned even if image fails
     assert not any(tmp_path.iterdir())
 
 
@@ -82,3 +96,15 @@ def test_creates_cache_dir_if_missing(tmp_path):
     rsps_lib.add(rsps_lib.GET, FAKE_IMAGE_URL, body=FAKE_IMAGE_BYTES, content_type="image/jpeg")
     fetch_species_image("Corvus brachyrhynchos", cache_dir, requests.Session())
     assert cache_dir.exists()
+
+
+@rsps_lib.activate
+def test_returns_common_name_even_without_photo(tmp_path):
+    """iNaturalist has a name but no photo URL."""
+    rsps_lib.add(rsps_lib.GET, INAT_URL, json={
+        "results": [{"name": "Corvus brachyrhynchos", "preferred_common_name": "American Crow",
+                     "default_photo": None}]
+    })
+    image_path, common_name = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+    assert image_path is None
+    assert common_name == "American Crow"
