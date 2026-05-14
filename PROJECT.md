@@ -22,7 +22,7 @@ Live at: `https://birdhouse.sgc.rayandhon.com` (public, no authentication)
 BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
                                               │
                        iNaturalist API ───────┤ (once per species, cached to disk)
-                       (photo + common name)  │
+                    (photo, common name, ID)  │
                                               │
                                     Browser ◄─┘ (server-rendered HTML + JS polling)
 ```
@@ -31,7 +31,7 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
 
 1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
 2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending.
-3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name)`.
+3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id)`.
 4. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
 5. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
 6. `GET /` renders `index.html` with the current store snapshot.
@@ -48,7 +48,7 @@ Full-bleed photo carousel. Each slide:
 
 - Photo fills the entire viewport (`object-fit: cover`)
 - Bottom gradient overlay for text legibility
-- Bottom-left: common name (large serif), scientific name (italic, links to iNaturalist), detection count + last seen time
+- Bottom-left: common name (large serif), scientific name (italic, links directly to the iNaturalist taxon page), detection count + last seen time
 - Bottom-right: first-seen time, slide counter ("3 of 12")
 - Top strip: date (left), species count (right)
 - Progress bar along the bottom edge
@@ -141,3 +141,21 @@ uv run birdhouse        # run locally (reads from .env or env vars)
 **Photos:** iNaturalist taxa API — `results[0].default_photo.large_url`. Cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg`. Falls back to a dark background if unavailable.
 
 **Common names:** BirdNET-Go REST API (`/api/v2/detections?limit=200`), seeded on first encounter. iNaturalist `preferred_common_name` used as fallback when BirdNET-Go doesn't have a name (e.g. rarer species not in the last 200 detections). Falls back to scientific name if neither source has it.
+
+**iNaturalist taxon ID:** Stored alongside the photo and common name so links go directly to `inaturalist.org/taxa/{id}` rather than a search page.
+
+### Disk cache layout
+
+Each species produces up to three sidecar files in `IMAGE_CACHE_DIR`:
+
+| File | Contents |
+|---|---|
+| `{Scientific_name}.jpg` | Cached photo from iNaturalist |
+| `{Scientific_name}.jpg.name` | Common name (plain text) |
+| `{Scientific_name}.jpg.id` | iNaturalist taxon ID (integer, plain text) |
+
+All three must exist for the cache to be considered complete; a missing `.id` or `.name` file triggers a fresh iNaturalist API call. Browse the cache with:
+
+```bash
+docker run --rm -v birdhouse_birdhouse-images:/cache alpine ls /cache
+```
