@@ -70,6 +70,7 @@ class Species:
     detection_count: int = 0
     image_path: Optional[str] = None   # filename served at /images/<filename>
     last_seen: str = ""    # "5:24 pm" local time; equals first_seen when count == 1
+    inat_id: Optional[int] = None      # iNaturalist taxon ID for direct taxon page link
 
 
 # ---------------------------------------------------------------------------
@@ -145,27 +146,32 @@ def fetch_species_image(
     scientific_name: str,
     cache_dir: Path,
     session: requests.Session,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], Optional[int]]:
     """
-    Return (image_filename, common_name) for the given species.
+    Return (image_filename, common_name, inat_taxon_id) for the given species.
 
     image_filename is the filename (relative to cache_dir) of a cached photo,
     fetched from iNaturalist if not already on disk; None if unavailable.
 
-    common_name is the preferred_common_name from iNaturalist, available
-    whenever the API is called (i.e. not when served from disk cache); None
-    if unavailable or served from disk.
+    common_name is the preferred_common_name from iNaturalist; None if unavailable.
+
+    inat_taxon_id is the iNaturalist taxon ID for linking to the taxon page directly.
+
+    All three values are persisted to sidecar files so they survive container restarts.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     filename = _safe_filename(scientific_name)
     dest = cache_dir / filename
     name_file = cache_dir / (filename + ".name")
+    id_file = cache_dir / (filename + ".id")
 
-    if dest.exists() and name_file.exists():
-        # Both image and common name are cached on disk — no API call needed.
-        return filename, name_file.read_text(encoding="utf-8").strip() or None
+    if dest.exists() and name_file.exists() and id_file.exists():
+        # All three cached on disk — no API call needed.
+        inat_id_str = id_file.read_text(encoding="utf-8").strip()
+        inat_id = int(inat_id_str) if inat_id_str.isdigit() else None
+        return filename, name_file.read_text(encoding="utf-8").strip() or None, inat_id
 
-    # Look up taxon on iNaturalist (needed for image, common name, or both).
+    # Look up taxon on iNaturalist (needed for image, common name, ID, or any combo).
     try:
         resp = session.get(
             INATURALIST_API,
@@ -176,39 +182,44 @@ def fetch_species_image(
         results = resp.json().get("results") or []
     except requests.RequestException as exc:
         log.warning("iNaturalist lookup failed for %s: %s", scientific_name, exc)
-        return (filename if dest.exists() else None), None
+        inat_id_str = id_file.read_text(encoding="utf-8").strip() if id_file.exists() else ""
+        inat_id = int(inat_id_str) if inat_id_str.isdigit() else None
+        return (filename if dest.exists() else None), None, inat_id
 
     if not results:
         log.info("No iNaturalist result for %s", scientific_name)
-        return (filename if dest.exists() else None), None
+        return (filename if dest.exists() else None), None, None
 
     taxon = results[0]
     inat_common = (taxon.get("preferred_common_name") or "").strip() or None
+    inat_id = taxon.get("id")
 
-    # Persist common name alongside image so it survives container restarts.
+    # Persist common name and taxon ID so they survive container restarts.
     if inat_common:
         name_file.write_text(inat_common, encoding="utf-8")
+    if inat_id:
+        id_file.write_text(str(inat_id), encoding="utf-8")
 
     if dest.exists():
-        # Image already on disk — we only needed the common name.
-        return filename, inat_common
+        # Image already on disk — we only needed the common name / ID.
+        return filename, inat_common, inat_id
 
     photo = taxon.get("default_photo") or {}
     image_url = photo.get("large_url") or photo.get("medium_url") or ""
 
     if not image_url:
         log.info("No photo URL for %s", scientific_name)
-        return None, inat_common
+        return None, inat_common, inat_id
 
     try:
         img_resp = session.get(image_url, timeout=20)
         img_resp.raise_for_status()
         dest.write_bytes(img_resp.content)
         log.info("Cached iNaturalist image for %s → %s", scientific_name, filename)
-        return filename, inat_common
+        return filename, inat_common, inat_id
     except requests.RequestException as exc:
         log.warning("Image download failed for %s: %s", scientific_name, exc)
-        return None, inat_common
+        return None, inat_common, inat_id
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +334,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
 
     species_list = []
     for sci, first_ts, last_ts, count in rows:
-        image_path, inat_common = fetch_species_image(sci, config.image_cache_dir, http)
+        image_path, inat_common, inat_id = fetch_species_image(sci, config.image_cache_dir, http)
         # Seed cache with iNaturalist common name when BirdNET-Go API didn't have it
         if inat_common and _name_cache.get(sci) == sci:
             _name_cache.set(sci, inat_common)
@@ -334,6 +345,7 @@ def _refresh(config: Config, http: requests.Session) -> None:
             last_seen=_format_time(last_ts, config.timezone),
             detection_count=count,
             image_path=image_path,
+            inat_id=inat_id,
         ))
 
     now = datetime.now(config.timezone).strftime("%-I:%M %p")

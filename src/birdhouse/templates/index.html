@@ -336,7 +336,7 @@
         <div class="slide__names">
           <div class="slide__common">{{ sp.common_name }}</div>
           <a class="slide__scientific"
-             href="https://www.inaturalist.org/taxa/search?q={{ sp.scientific_name | replace(' ', '+') }}"
+             href="{% if sp.inat_id %}https://www.inaturalist.org/taxa/{{ sp.inat_id }}{% else %}https://www.inaturalist.org/taxa/search?q={{ sp.scientific_name | replace(' ', '+') }}{% endif %}"
              target="_blank"
              rel="noopener noreferrer">{{ sp.scientific_name }}</a>
           <div class="slide__detection-count">
