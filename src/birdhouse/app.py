@@ -233,7 +233,7 @@ class CommonNameCache:
                 for r in records:
                     sci = (r.get("scientificName") or "").strip()
                     common = (r.get("commonName") or "").strip()
-                    if sci and common:
+                    if sci and common and common != sci:
                         self._cache[sci] = common
             log.info("Common name cache seeded with %d entries", len(self._cache))
         except Exception as exc:
