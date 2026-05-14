@@ -159,11 +159,13 @@ def fetch_species_image(
     cache_dir.mkdir(parents=True, exist_ok=True)
     filename = _safe_filename(scientific_name)
     dest = cache_dir / filename
+    name_file = cache_dir / (filename + ".name")
 
-    if dest.exists():
-        return filename, None
+    if dest.exists() and name_file.exists():
+        # Both image and common name are cached on disk — no API call needed.
+        return filename, name_file.read_text(encoding="utf-8").strip() or None
 
-    # Look up taxon on iNaturalist
+    # Look up taxon on iNaturalist (needed for image, common name, or both).
     try:
         resp = session.get(
             INATURALIST_API,
@@ -174,14 +176,22 @@ def fetch_species_image(
         results = resp.json().get("results") or []
     except requests.RequestException as exc:
         log.warning("iNaturalist lookup failed for %s: %s", scientific_name, exc)
-        return None, None
+        return (filename if dest.exists() else None), None
 
     if not results:
         log.info("No iNaturalist result for %s", scientific_name)
-        return None, None
+        return (filename if dest.exists() else None), None
 
     taxon = results[0]
     inat_common = (taxon.get("preferred_common_name") or "").strip() or None
+
+    # Persist common name alongside image so it survives container restarts.
+    if inat_common:
+        name_file.write_text(inat_common, encoding="utf-8")
+
+    if dest.exists():
+        # Image already on disk — we only needed the common name.
+        return filename, inat_common
 
     photo = taxon.get("default_photo") or {}
     image_url = photo.get("large_url") or photo.get("medium_url") or ""
