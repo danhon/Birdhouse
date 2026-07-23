@@ -132,21 +132,22 @@ dove, white-crowned sparrow) via `claude-opus-4-8` + structured outputs.
 
 ---
 
-## Tests
+## Tests — implemented (11 new tests, 62/62 passing)
 
-- [ ] `tests/test_image_cache.py`: existing tests unpack the current
-      3-tuple from `fetch_species_image` — same failure mode as before (the
-      tuple grew once already this session and broke 6 tests). Update all
-      call sites to the new 4-tuple.
-- [ ] New tests for `_compute_focus_point`, mocked via `unittest.mock.patch`
-      — **not** the `responses` library fixture pattern already in this
-      file, since that only intercepts `requests` and the `anthropic` SDK
-      uses `httpx` under the hood. Cover: success, refusal, malformed JSON,
-      `visible: false` (still uses returned coords), `AuthenticationError`
-      (permanent disable), `RateLimitError` (cooldown applied, no permanent
-      disable).
-- [ ] Test the cooldown map directly: second call within the window is
-      skipped without hitting the (mocked) client.
+- [x] `tests/test_image_cache.py`: updated existing tests to the new
+      4-tuple. Also added one integration test wiring a mocked vision
+      client all the way through `fetch_species_image()`, not just testing
+      `_get_or_compute_focus()` in isolation.
+- [x] `tests/test_focus_point.py` (new file): `_get_or_compute_focus`
+      tested via plain `unittest.mock.MagicMock` on the client (confirmed
+      `responses` doesn't apply — `anthropic` uses `httpx`, not `requests`).
+      Covers: success + sidecar write, box-relative clamping, `visible:
+      false` still using the returned coords, cache hit (no API call),
+      malformed cache file (recomputes), refusal, malformed JSON,
+      `AuthenticationError` (permanent disable, verified a second call for
+      a *different* species also short-circuits), `RateLimitError` and
+      `APIConnectionError` (cooldown, verified a second call within the
+      window doesn't hit the client again).
 
 ---
 

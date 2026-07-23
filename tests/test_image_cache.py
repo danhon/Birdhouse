@@ -1,5 +1,9 @@
 """Tests for iNaturalist image fetching and disk caching."""
 
+import json
+from unittest.mock import MagicMock
+from types import SimpleNamespace
+
 import requests
 import responses as rsps_lib
 
@@ -110,6 +114,35 @@ def test_creates_cache_dir_if_missing(tmp_path):
     rsps_lib.add(rsps_lib.GET, FAKE_IMAGE_URL, body=FAKE_IMAGE_BYTES, content_type="image/jpeg")
     fetch_species_image("Corvus brachyrhynchos", cache_dir, requests.Session())
     assert cache_dir.exists()
+
+
+@rsps_lib.activate
+def test_wires_vision_client_through_to_compute_focus(tmp_path):
+    """fetch_species_image() should call the vision client and thread its
+    result through as the 4th return value once an image is on disk."""
+    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos", common_name="American Crow"))
+    rsps_lib.add(rsps_lib.GET, FAKE_IMAGE_URL, body=FAKE_IMAGE_BYTES, content_type="image/jpeg")
+
+    vision_response = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text=json.dumps({
+            "visible": True,
+            "bird_box": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9},
+            "focus_x": 0.6,
+            "focus_y": 0.4,
+        }))],
+    )
+    vision_client = MagicMock()
+    vision_client.messages.create.return_value = vision_response
+
+    image_path, common_name, inat_id, focus = fetch_species_image(
+        "Corvus brachyrhynchos", tmp_path, requests.Session(), vision_client
+    )
+
+    assert image_path is not None
+    assert focus == (0.6, 0.4)
+    vision_client.messages.create.assert_called_once()
+    assert (tmp_path / (image_path + ".focus")).read_text(encoding="utf-8") == "0.6000,0.4000"
 
 
 @rsps_lib.activate
