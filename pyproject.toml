@@ -2,7 +2,7 @@
 name = "birdhouse"
 version = "0.1.0"
 description = "Full-bleed bird species carousel from BirdNET-Go detections"
-readme = "PROJECT.md"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",

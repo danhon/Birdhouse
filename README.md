@@ -60,7 +60,7 @@ Full-bleed photo carousel. Each slide:
 
 ```
 Birdhouse/
-├── PROJECT.md
+├── README.md
 ├── pyproject.toml
 ├── uv.lock
 ├── Dockerfile
