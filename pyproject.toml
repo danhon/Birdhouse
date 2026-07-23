@@ -8,6 +8,7 @@ dependencies = [
     "flask>=3.0",
     "requests>=2.31",
     "python-dateutil>=2.9",
+    "anthropic>=0.68",
 ]
 
 [project.optional-dependencies]

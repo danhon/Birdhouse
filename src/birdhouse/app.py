@@ -8,6 +8,8 @@ to disk). Fetches common names from the BirdNET-Go REST API.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -20,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import anthropic
 import requests
 from flask import Flask, jsonify, render_template, send_from_directory
 
@@ -43,6 +46,7 @@ class Config:
     timezone: ZoneInfo
     poll_interval: int
     slide_duration: int
+    vision_enabled: bool
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -55,6 +59,9 @@ class Config:
             timezone=ZoneInfo(os.environ.get("TZ", "America/Los_Angeles")),
             poll_interval=int(os.environ.get("POLL_INTERVAL", "60")),
             slide_duration=int(os.environ.get("SLIDE_DURATION", "8")),
+            # Smart photo cropping (focal-point-aware object-position) is only
+            # enabled when a key is present; otherwise slides use a center crop.
+            vision_enabled=bool(os.environ.get("ANTHROPIC_API_KEY")),
         )
 
 
@@ -71,6 +78,8 @@ class Species:
     image_path: Optional[str] = None   # filename served at /images/<filename>
     last_seen: str = ""    # "5:24 pm" local time; equals first_seen when count == 1
     inat_id: Optional[int] = None      # iNaturalist taxon ID for direct taxon page link
+    focus_x: float = 0.5   # normalized crop anchor (object-position) — center by default
+    focus_y: float = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +152,37 @@ def _safe_filename(scientific_name: str) -> str:
 
 
 def fetch_species_image(
+    scientific_name: str,
+    cache_dir: Path,
+    session: requests.Session,
+    vision_client: Optional[anthropic.Anthropic] = None,
+) -> tuple[Optional[str], Optional[str], Optional[int], Optional[tuple[float, float]]]:
+    """
+    Return (image_filename, common_name, inat_taxon_id, focus) for the given species.
+
+    image_filename, common_name, and inat_taxon_id come from _fetch_image_metadata()
+    (see there for details).
+
+    focus is a normalized (x, y) crop anchor for CSS object-position, computed once
+    via a Claude vision call and cached to a sidecar file — None when vision_client
+    is not supplied, the image isn't cached, or the lookup failed/is in cooldown, in
+    which case callers should fall back to a center crop.
+    """
+    image_filename, inat_common, inat_id = _fetch_image_metadata(scientific_name, cache_dir, session)
+
+    focus = None
+    if image_filename and vision_client is not None:
+        focus = _get_or_compute_focus(
+            scientific_name,
+            cache_dir / image_filename,
+            cache_dir / (image_filename + ".focus"),
+            vision_client,
+        )
+
+    return image_filename, inat_common, inat_id, focus
+
+
+def _fetch_image_metadata(
     scientific_name: str,
     cache_dir: Path,
     session: requests.Session,
@@ -220,6 +260,141 @@ def fetch_species_image(
     except requests.RequestException as exc:
         log.warning("Image download failed for %s: %s", scientific_name, exc)
         return None, inat_common, inat_id
+
+
+# ---------------------------------------------------------------------------
+# Vision-based crop focal point
+#
+# Computed once per species via a Claude vision call, then cached to a
+# sidecar file forever (same pattern as .name/.id) — never recomputed on
+# subsequent polls unless the sidecar file is deleted or hand-edited.
+# ---------------------------------------------------------------------------
+
+FOCUS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "visible": {"type": "boolean"},
+        "bird_box": {
+            "type": "object",
+            "properties": {
+                "x0": {"type": "number"},
+                "y0": {"type": "number"},
+                "x1": {"type": "number"},
+                "y1": {"type": "number"},
+            },
+            "required": ["x0", "y0", "x1", "y1"],
+            "additionalProperties": False,
+        },
+        "focus_x": {"type": "number"},
+        "focus_y": {"type": "number"},
+    },
+    "required": ["visible", "bird_box", "focus_x", "focus_y"],
+    "additionalProperties": False,
+}
+
+_FOCUS_PROMPT = (
+    "Find the bird in this photo. If more than one bird is visible, choose "
+    "the most prominent or central one. Return: (1) a bounding box "
+    "(bird_box, normalized 0.0-1.0, origin top-left) tightly enclosing that "
+    "bird's whole body, (2) the normalized coordinates (focus_x, focus_y) "
+    "of its head -- the eye if visible, otherwise the center of the head "
+    "-- and (3) whether a bird's head is clearly visible."
+)
+
+# Retry cooldown for transient failures (rate limits, network blips) so a
+# persistent problem doesn't retry every poll cycle. Process-lifetime only —
+# deliberately simple, resets on restart.
+_FOCUS_COOLDOWN_SECONDS = 60 * 60
+_focus_cooldown: dict[str, float] = {}
+
+# Set on an auth failure — a bad/revoked key won't fix itself between polls,
+# so stop attempting for the rest of the process lifetime rather than
+# retrying (and logging) forever.
+_vision_disabled = False
+
+
+def _clamp_focus_to_box(fx: float, fy: float, box: dict) -> tuple[float, float]:
+    """Clamp a focus point into the reported bird bounding box, so a bad
+    head estimate can't land in empty background."""
+    x0, y0, x1, y1 = box["x0"], box["y0"], box["x1"], box["y1"]
+    if x1 < x0:
+        x0, x1 = x1, x0
+    if y1 < y0:
+        y0, y1 = y1, y0
+    return min(max(fx, x0), x1), min(max(fy, y0), y1)
+
+
+def _get_or_compute_focus(
+    scientific_name: str,
+    image_path: Path,
+    focus_file: Path,
+    client: anthropic.Anthropic,
+) -> Optional[tuple[float, float]]:
+    """
+    Return the cached crop-anchor focal point for a species' photo, computing
+    it via a one-time Claude vision call if not already cached. Returns None
+    when unavailable (permanently disabled, in cooldown, or this call
+    failed) — callers fall back to a center crop.
+    """
+    global _vision_disabled
+
+    if focus_file.exists():
+        try:
+            x_str, y_str = focus_file.read_text(encoding="utf-8").strip().split(",")
+            return float(x_str), float(y_str)
+        except (ValueError, OSError):
+            log.warning("Malformed focus file for %s, recomputing", scientific_name)
+
+    if _vision_disabled:
+        return None
+
+    next_retry = _focus_cooldown.get(scientific_name)
+    if next_retry is not None and time.time() < next_retry:
+        return None
+
+    try:
+        image_data = base64.standard_b64encode(image_path.read_bytes()).decode("utf-8")
+        response = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=200,
+            output_config={"format": {"type": "json_schema", "schema": FOCUS_SCHEMA}},
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": image_data},
+                    },
+                    {"type": "text", "text": _FOCUS_PROMPT},
+                ],
+            }],
+        )
+    except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+        log.error("Anthropic authentication failed — disabling smart cropping: %s", exc)
+        _vision_disabled = True
+        return None
+    except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
+        log.warning("Focus point lookup for %s failed, will retry later: %s", scientific_name, exc)
+        _focus_cooldown[scientific_name] = time.time() + _FOCUS_COOLDOWN_SECONDS
+        return None
+
+    if response.stop_reason == "refusal":
+        log.info("Focus point lookup for %s refused", scientific_name)
+        _focus_cooldown[scientific_name] = time.time() + _FOCUS_COOLDOWN_SECONDS
+        return None
+
+    try:
+        text = next(b.text for b in response.content if b.type == "text")
+        data = json.loads(text)
+        fx, fy = _clamp_focus_to_box(data["focus_x"], data["focus_y"], data["bird_box"])
+    except (StopIteration, KeyError, ValueError, json.JSONDecodeError) as exc:
+        log.warning("Could not parse focus point response for %s: %s", scientific_name, exc)
+        _focus_cooldown[scientific_name] = time.time() + _FOCUS_COOLDOWN_SECONDS
+        return None
+
+    focus_file.write_text(f"{fx:.4f},{fy:.4f}", encoding="utf-8")
+    log.info("Computed focus point for %s: (%.3f, %.3f)", scientific_name, fx, fy)
+    return fx, fy
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +495,7 @@ def _date_label(tz: ZoneInfo) -> str:
     return datetime.now(tz).strftime("%A %-d %B %Y")
 
 
-def _refresh(config: Config, http: requests.Session) -> None:
+def _refresh(config: Config, http: requests.Session, vision_client: Optional[anthropic.Anthropic]) -> None:
     """Fetch today's data from the DB, images from iNaturalist, update store."""
     log.info("Refreshing from DB: %s", config.birdnet_db_path)
 
@@ -334,7 +509,9 @@ def _refresh(config: Config, http: requests.Session) -> None:
 
     species_list = []
     for sci, first_ts, last_ts, count in rows:
-        image_path, inat_common, inat_id = fetch_species_image(sci, config.image_cache_dir, http)
+        image_path, inat_common, inat_id, focus = fetch_species_image(
+            sci, config.image_cache_dir, http, vision_client
+        )
         # Seed cache with iNaturalist common name when BirdNET-Go API didn't have it
         if inat_common and _name_cache.get(sci) == sci:
             _name_cache.set(sci, inat_common)
@@ -346,6 +523,8 @@ def _refresh(config: Config, http: requests.Session) -> None:
             detection_count=count,
             image_path=image_path,
             inat_id=inat_id,
+            focus_x=focus[0] if focus else 0.5,
+            focus_y=focus[1] if focus else 0.5,
         ))
 
     now = datetime.now(config.timezone).strftime("%-I:%M %p")
@@ -356,11 +535,14 @@ def _refresh(config: Config, http: requests.Session) -> None:
 def start_background_poller(config: Config) -> None:
     http = requests.Session()
     http.headers["User-Agent"] = "Birdhouse/0.1"
+    # anthropic.Anthropic() reads ANTHROPIC_API_KEY from the environment itself;
+    # only constructed when a key is present, per config.vision_enabled.
+    vision_client = anthropic.Anthropic() if config.vision_enabled else None
 
     def loop() -> None:
         while True:
             try:
-                _refresh(config, http)
+                _refresh(config, http, vision_client)
             except Exception:
                 log.exception("Unhandled error in refresh loop")
             time.sleep(config.poll_interval)

@@ -19,6 +19,7 @@ def config(tmp_path):
         timezone=ZoneInfo("America/Los_Angeles"),
         poll_interval=60,
         slide_duration=8,
+        vision_enabled=False,
     )
 
 

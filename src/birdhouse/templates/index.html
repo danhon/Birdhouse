@@ -48,7 +48,7 @@
       width: 100%;
       height: 100%;
       object-fit: cover;
-      object-position: center;
+      /* object-position is set inline per slide from sp.focus_x/focus_y */
     }
 
     .slide__no-photo {
@@ -327,7 +327,8 @@
         <img class="slide__photo"
              src="/images/{{ sp.image_path }}"
              alt="{{ sp.common_name }}"
-             draggable="false">
+             draggable="false"
+             style="object-position: {{ (sp.focus_x*100)|round(1) }}% {{ (sp.focus_y*100)|round(1) }}%">
       {% else %}
         <div class="slide__no-photo"></div>
       {% endif %}

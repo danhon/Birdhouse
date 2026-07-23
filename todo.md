@@ -48,97 +48,84 @@ dove, white-crowned sparrow) via `claude-opus-4-8` + structured outputs.
 - **Conclusion:** ship the bounding-box version, not the plain point-only
   version from the original plan.
 
-## Backend (`src/birdhouse/app.py`)
+## Backend (`src/birdhouse/app.py`) — implemented
 
-- [ ] `Config` gains `vision_enabled: bool` — computed once in
-      `Config.from_env()` from whether `ANTHROPIC_API_KEY` is set. Vision
-      logic is skipped entirely when false — checked once at startup, not
-      per-species, per-poll.
-- [ ] New `FOCUS_SCHEMA` (module constant) — `{visible: bool, bird_box:
-      {x0,y0,x1,y1}, focus_x: number, focus_y: number}`,
-      `additionalProperties: false` (validated shape — see above).
-- [ ] New `_compute_focus_point(image_url: str, client) ->
-      tuple[float, float] | None`:
-  - Prompt: find the bird's whole-body bounding box, then its head (eye if
-    visible, otherwise head center); return both. **Explicitly handle
-    multiple birds** ("if more than one bird is visible, choose the most
-    prominent or central one") — validated on the mallard-pair photo,
-    correctly picked the foreground bird.
-  - Clamp `(focus_x, focus_y)` into `bird_box` (not a fixed `[0.1, 0.9]`
-    range as originally planned — the box-relative clamp is what actually
-    fixed the observed failure; a fixed margin wouldn't have).
-  - Use the model's `(x, y)` even when `visible: false` (a rough "somewhere
-    on the bird" guess still beats dead-center) — `visible` is
-    informational/logged, not a fallback trigger.
-  - Returns `None` only on genuine failure: refusal (`stop_reason ==
-    "refusal"`), unparseable response, or an exception — caller decides
-    whether/when to retry based on **which** exception:
-    - `anthropic.AuthenticationError` / `PermissionDeniedError` → bad or
-      revoked key. Set a module-level `_vision_disabled = True` and log once
-      at `error` level. Don't retry for the rest of the process lifetime —
-      retrying a broken key every cycle forever is exactly the failure mode
-      being designed against.
-    - `anthropic.RateLimitError` / `APIConnectionError` / 5xx
-      `APIStatusError` → transient. Apply the cooldown (below) and retry
-      later. (Note: the SDK already auto-retries 429/5xx *within* one call
-      with backoff — this cooldown is the *outer* layer across poll cycles,
-      for when that also gets exhausted.)
-    - Any other `APIStatusError` (e.g. 400 — malformed request, a code bug)
-      or a JSON parse failure → log at `warning`, apply the cooldown too
-      (avoids a hot loop if it's systematic) but don't disable permanently
-      (could be a one-off).
-- [ ] Module-level cooldown state: `_focus_cooldown: dict[str, float] = {}`
-      (scientific_name → next-retry-timestamp). No lock needed — only ever
-      touched from the single background poller thread, same threading
-      model already used by `_name_cache`/`CommonNameCache`. Resets on
-      restart — deliberately simple, no persisted backoff state.
-- [ ] **Refactor `fetch_species_image` to a single exit point.** Currently
-      it has three separate `return` statements, each reachable whenever
-      `dest.exists()` is true (full cache hit, mid-function after an
-      iNaturalist lookup, and after a fresh download). Focus-point
-      computation needs to run once per code path, right before whichever
-      return fires — cleanest as one internal step immediately before a
-      single unified `return` at the bottom, rather than duplicating the
-      check three times.
-  - New sidecar file: `{filename}.focus` → `"0.46,0.32"` (plain text, same
-    style as `.name`/`.id` — hand-editable).
-  - Parse defensively like the existing `.id` parser
-    ([app.py:171](src/birdhouse/app.py:171)): if the file doesn't split into
-    two valid floats, fall back to `(0.5, 0.5)` rather than crashing
-    template rendering.
-  - Gate the vision call on: `config.vision_enabled`, `dest.exists()` (no
-    point cropping a photo that doesn't exist), `.focus` file missing, and
-    not in cooldown.
-- [ ] Return signature becomes `(image_filename, common_name, inat_id,
-      focus)` where `focus` is `tuple[float, float] | None` — a 4th element,
-      not two new separate floats, to keep the tuple manageable.
-- [ ] `Species` dataclass gains `focus_x: float = 0.5`, `focus_y: float =
-      0.5` — safe defaults so nothing regresses if focus data is absent
-      (feature disabled, cooldown, or genuine failure).
-- [ ] `_refresh()` passes the new tuple element through into the `Species`
-      constructor.
+- [x] `Config` gains `vision_enabled: bool` — computed once in
+      `Config.from_env()` from whether `ANTHROPIC_API_KEY` is set.
+- [x] `FOCUS_SCHEMA` module constant — `{visible, bird_box: {x0,y0,x1,y1},
+      focus_x, focus_y}`, `additionalProperties: false` (validated shape).
+- [x] `_get_or_compute_focus(scientific_name, image_path, focus_file,
+      client) -> tuple[float, float] | None` — sends the **already-cached
+      local file's bytes** (base64), not the iNaturalist URL as originally
+      planned. Reasoning: the "fully cached, no network call needed" path
+      (all sidecars present) never has a fresh `image_url` in scope — only
+      the local `dest` path is guaranteed to exist wherever focus
+      computation runs. Base64-from-disk is also exactly what the
+      validation script tested, so it's the actually-validated path, not
+      an untested variant.
+  - Prompt asks for the bird's whole-body bounding box + head point in one
+    call; multiple-bird tie-break instruction included (validated on the
+    mallard pair).
+  - `(focus_x, focus_y)` clamped into `bird_box` via `_clamp_focus_to_box`.
+  - Cached focus file parsed defensively (bad split/float → log + fall
+    through to recompute) — same defensive spirit as the `.id` parser.
+  - Two-tier exception handling, not three — `RateLimitError` is itself an
+    `APIStatusError` subclass, so "transient" and "other API error" collapse
+    to identical cooldown treatment; only auth errors need distinct
+    (permanent-disable) handling:
+    - `AuthenticationError` / `PermissionDeniedError` → `_vision_disabled =
+      True` (module-level), logged once at `error`. Never retried again
+      this process.
+    - `APIStatusError` / `APIConnectionError` (covers rate limits, 5xx,
+      other 4xx, and connection failures) → cooldown applied, logged at
+      `warning`.
+    - `stop_reason == "refusal"` and JSON parse failures → same cooldown
+      treatment.
+  - Uses the model's `(x, y)` regardless of `visible` — informational only.
+- [x] Module-level `_focus_cooldown: dict[str, float]` + `_vision_disabled`
+      flag, unlocked (single poller thread), 1-hour cooldown window.
+- [x] **Refactor, but not literally "single exit point."** Instead of
+      flattening `_fetch_image_metadata`'s three existing `return`s (real
+      risk of subtly changing already-tested iNaturalist-failure-handling
+      behavior for no real benefit), left that function's body untouched
+      and wrapped it: `fetch_species_image()` now calls
+      `_fetch_image_metadata()` for the existing 3-tuple, then computes
+      focus once in one place using its result, then returns the 4-tuple.
+      Same practical goal (one call site for focus logic) with a much
+      smaller, lower-risk diff on working code.
+  - New sidecar file `{filename}.focus`, gated on `config.vision_enabled`,
+    `image_filename` truthy (image actually cached), file missing, and
+    not in cooldown/disabled.
+- [x] Return signature: `(image_filename, common_name, inat_id, focus)`,
+      `focus: tuple[float, float] | None`.
+- [x] `Species` gains `focus_x: float = 0.5`, `focus_y: float = 0.5`.
+- [x] `_refresh()` / `start_background_poller()` construct
+      `anthropic.Anthropic()` once (only when `vision_enabled`) and thread
+      it through to `fetch_species_image()`, same pattern as the existing
+      `requests.Session`.
+- [x] Added `anthropic` to `pyproject.toml` dependencies.
 
 ---
 
-## Frontend (`src/birdhouse/templates/index.html`)
+## Frontend (`src/birdhouse/templates/index.html`) — implemented
 
-- [ ] Remove the static `object-position: center` rule from `.slide__photo`
-      ([index.html:45-52](src/birdhouse/templates/index.html:45)).
-- [ ] Add an inline style per slide on the `<img>` tag:
-      `style="object-position: {{ (sp.focus_x*100)|round(1) }}% {{
-      (sp.focus_y*100)|round(1) }}%"`. `object-fit: cover` is untouched —
+- [x] Removed the static `object-position: center` rule from `.slide__photo`.
+- [x] Added an inline style per slide on the `<img>` tag driven by
+      `sp.focus_x`/`sp.focus_y`. `object-fit: cover` is untouched —
       full-bleed guaranteed regardless of focus data.
 
 ---
 
 ## Config / docs
 
-- [ ] Add `ANTHROPIC_API_KEY` to `.env.example` and `config.example.env`,
+- [x] Add `ANTHROPIC_API_KEY` to `.env.example` and `config.example.env`,
       documented as **optional** — "omit to disable smart cropping; falls
       back to a static center crop."
-- [ ] Add to `compose.yml` env passthrough.
-- [ ] README config table: add the `ANTHROPIC_API_KEY` row.
-- [ ] README disk-cache table: add `{Scientific_name}.jpg.focus` →
+- [x] ~~Add to `compose.yml` env passthrough~~ — not needed, `compose.yml`
+      already does `env_file: .env`, which passes every variable through;
+      there's no per-variable allowlist to edit.
+- [x] README config table: add the `ANTHROPIC_API_KEY` row.
+- [x] README disk-cache table: add `{Scientific_name}.jpg.focus` →
       "Normalized focal point (x,y) for cropping, plain text" — and
       explicitly document it as hand-editable for manual correction (same
       override pattern as the existing `.name` sidecar).
