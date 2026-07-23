@@ -28,22 +28,45 @@ anchored, never whether the photo fills it.
 
 ---
 
+## Validated (2026-07-23)
+
+Ran a standalone script against 8 real iNaturalist photos (crow, house
+finch, Steller's jay, mallard pair, black-capped chickadee, junco, mourning
+dove, white-crowned sparrow) via `claude-opus-4-8` + structured outputs.
+
+- **First pass** (head/eye point only): 7/8 correct. One **repeatable**
+  miss on the chickadee — reran 4x, x-coordinate landed wrong every time
+  (0.21–0.44 vs. the bird's actual ~0.64), while y was consistently
+  plausible. Not noise — a real, consistent perception error on that
+  composition (busy branch clutter).
+- **Fix:** also ask for a bounding box of the bird's whole body in the same
+  call, then clamp the head point into that box. This wasn't just a
+  clamp-based safety net — asking for the box *changed the model's own head
+  estimate* (it stopped scattering and converged on the right answer,
+  landing dead-on the eye). Re-ran the full batch afterward: 8/8 correct,
+  nothing regressed.
+- **Conclusion:** ship the bounding-box version, not the plain point-only
+  version from the original plan.
+
 ## Backend (`src/birdhouse/app.py`)
 
 - [ ] `Config` gains `vision_enabled: bool` — computed once in
       `Config.from_env()` from whether `ANTHROPIC_API_KEY` is set. Vision
       logic is skipped entirely when false — checked once at startup, not
       per-species, per-poll.
-- [ ] New `FOCUS_SCHEMA` (module constant) — `{visible: bool, focus_x:
-      number, focus_y: number}`, `additionalProperties: false`.
+- [ ] New `FOCUS_SCHEMA` (module constant) — `{visible: bool, bird_box:
+      {x0,y0,x1,y1}, focus_x: number, focus_y: number}`,
+      `additionalProperties: false` (validated shape — see above).
 - [ ] New `_compute_focus_point(image_url: str, client) ->
       tuple[float, float] | None`:
-  - Prompt: find the bird's head (eye if visible, otherwise head center);
-    return normalized `(x, y)`, origin top-left; **explicitly handle
+  - Prompt: find the bird's whole-body bounding box, then its head (eye if
+    visible, otherwise head center); return both. **Explicitly handle
     multiple birds** ("if more than one bird is visible, choose the most
-    prominent or central one").
-  - Clamp result to `[0.1, 0.9]` on both axes so an edge-case answer can't
-    push the anchor flush against the frame boundary.
+    prominent or central one") — validated on the mallard-pair photo,
+    correctly picked the foreground bird.
+  - Clamp `(focus_x, focus_y)` into `bird_box` (not a fixed `[0.1, 0.9]`
+    range as originally planned — the box-relative clamp is what actually
+    fixed the observed failure; a fixed margin wouldn't have).
   - Use the model's `(x, y)` even when `visible: false` (a rough "somewhere
     on the bird" guess still beats dead-center) — `visible` is
     informational/logged, not a fallback trigger.
@@ -142,17 +165,16 @@ anchored, never whether the photo fills it.
 
 ## Validation (before wiring into the app)
 
-- [ ] Standalone script against real cached photos, not synthetic ones.
-      Deliberately adversarial sample, not just easy cases:
-  - the house finch case that already failed under plain `smartcrop`
-  - obscured/branch-covered head
-  - bird partially out of frame
-  - two birds in one photo (tie-break check)
-  - head turned away from camera
-- [ ] Render crosshair overlays on results for eyeballing, same as the
+- [x] Standalone script against real cached photos, not synthetic ones.
+      Adversarial sample covered: the house finch case that already failed
+      under plain `smartcrop`, branch-clutter obscuring the head
+      (chickadee), two birds in one photo (mallard pair, tie-break check).
+      See "Validated" section above for the full result and the
+      bounding-box fix it led to.
+- [x] Render crosshair overlays on results for eyeballing, same as the
       earlier `smartcrop` feasibility check.
-- [ ] Only proceed to wiring into `app.py` once this looks right — cheap to
-      iterate on the prompt/schema here before touching the real pipeline.
+- [x] Proceed to wiring into `app.py` — schema/prompt validated 8/8 on the
+      test sample after the bounding-box fix.
 
 ## Verification (after wiring in)
 
