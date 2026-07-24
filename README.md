@@ -11,6 +11,7 @@ Live at: `https://birdhouse.sgc.rayandhon.com` (public, no authentication)
 - Queries the BirdNET-Go SQLite database directly every 60 seconds
 - Shows each unique species once, ordered by first detection time today
 - Displays a full-bleed species photo (from iNaturalist, cached to disk), common name, scientific name, first-seen time, last-seen time, and detection count
+- Optionally uses Claude vision to crop each photo around the bird itself rather than the frame center (requires `ANTHROPIC_API_KEY`; falls back to a center crop without it)
 - Automatically reloads when a new species appears or the date rolls over
 - Responsive layout for both large displays and mobile portrait
 
@@ -24,6 +25,9 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
                        iNaturalist API ───────┤ (once per species, cached to disk)
                     (photo, common name, ID)  │
                                               │
+                          Claude API ─────────┤ (once per species, cached to disk;
+                      (crop focal point)      │  optional — skipped without a key)
+                                              │
                                     Browser ◄─┘ (server-rendered HTML + JS polling)
 ```
 
@@ -31,12 +35,13 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
 
 1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
 2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending.
-3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id)`.
+3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id, focus)`.
 4. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
-5. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
-6. `GET /` renders `index.html` with the current store snapshot.
-7. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
-8. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
+5. When `ANTHROPIC_API_KEY` is set, `fetch_species_image()` also computes a crop focal point via a one-time Claude vision call (see "Smart photo cropping" below), cached to disk like everything else.
+6. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
+7. `GET /` renders `index.html` with the current store snapshot.
+8. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
+9. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
 
 **"Today"** = calendar date in the timezone set by `TZ` env var.
 
@@ -77,7 +82,8 @@ Birdhouse/
 │   ├── test_db.py
 │   ├── test_app.py
 │   ├── test_detections.py
-│   └── test_image_cache.py
+│   ├── test_image_cache.py
+│   └── test_focus_point.py
 └── systemd/
     └── birdhouse.service    ← legacy; superseded by Docker Compose
 ```
