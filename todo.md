@@ -164,9 +164,18 @@ dove, white-crowned sparrow) via `claude-opus-4-8` + structured outputs.
 - [x] Proceed to wiring into `app.py` — schema/prompt validated 8/8 on the
       test sample after the bounding-box fix.
 
-## Verification (after wiring in)
+## Verification (after wiring in) — done
 
-- [ ] `uv run pytest` green.
-- [ ] Browser-tool screenshot comparison: iPad landscape (regression check
-      — must look unchanged), plus 2–3 phone widths, using real species
-      photos including the finch case above.
+- [x] `uv run pytest` green (62/62).
+- [x] End-to-end real-data check: a throwaway script seeded the live app
+      with 6 real species by calling the actual `fetch_species_image()` —
+      real iNaturalist + real Claude vision calls, not mocks — then ran the
+      Flask dev server for the Browser tool to screenshot.
+- [x] Desktop/landscape (regression check): full-bleed, unchanged from
+      before — object-position defaults render fine.
+- [x] Mobile portrait (375×812), all 6 species: crow, jay, dove, mallard
+      pair (correctly on the foreground bird), and — the two cases that
+      mattered most — **house finch** (the original `smartcrop` failure:
+      head fully in frame, not clipped) and **black-capped chickadee** (the
+      case that needed the bounding-box fix: dead-on the eye). All
+      full-bleed, no letterboxing, anchored on the bird in every case.
