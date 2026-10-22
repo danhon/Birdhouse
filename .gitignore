@@ -8,3 +8,5 @@ config.env
 !config.example.env
 .DS_Store
 .superpowers/
+._*
+.clearance-rendered-preview-*/

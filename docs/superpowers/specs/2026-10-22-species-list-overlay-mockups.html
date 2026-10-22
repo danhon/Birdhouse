@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Species list — layout options</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #222; color: #ddd; font-family: system-ui, -apple-system, sans-serif; padding: 24px; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 4px; color: #fff; }
+  .sub { color: #999; font-size: .9rem; margin-bottom: 20px; max-width: 70ch; }
+  .choice { margin-bottom: 36px; border: 2px solid transparent; border-radius: 10px; padding: 12px; cursor: pointer; }
+  .choice.selected { border-color: #6aa9ff; background: #1b2533; }
+  .choice h2 { font-size: 1rem; color: #fff; margin-bottom: 4px; }
+  .choice p { font-size: .85rem; color: #aaa; margin-bottom: 12px; max-width: 80ch; }
+
+  /* ── iPad landscape frame (4:3) ─────────────────────────── */
+  .ipad { width: min(100%, 1024px); aspect-ratio: 4 / 3; position: relative; overflow: hidden;
+          border-radius: 18px; border: 10px solid #000; background: #111; color: #fff; cursor: default; }
+  .photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 51% 27.6%; }
+  .grad  { position: absolute; inset: 0; background: linear-gradient(to bottom, transparent 40%, rgba(0,0,0,.25) 60%, rgba(0,0,0,.75) 85%, rgba(0,0,0,.9) 100%); }
+  .header { position: absolute; top: 0; left: 0; right: 0; padding: 1.2rem 2rem; display: flex; justify-content: space-between;
+            background: linear-gradient(to bottom, rgba(0,0,0,.55), transparent); z-index: 5;
+            font-size: .85rem; color: rgba(255,255,255,.6); letter-spacing: .04em; text-transform: uppercase; }
+  .header .count { color: #fff; border-bottom: 1px solid rgba(255,255,255,.35); padding-bottom: 2px; }
+  .info { position: absolute; bottom: 0; left: 0; right: 0; padding: 1.5rem 2rem 2rem; }
+  .common { font-family: Georgia, "Times New Roman", serif; font-size: 3rem; line-height: 1.1; text-shadow: 0 2px 12px rgba(0,0,0,.6); }
+  .sci { font-family: Georgia, serif; font-style: italic; font-size: 1.25rem; color: rgba(255,255,255,.65); margin-top: .3rem; }
+
+  /* ── shared list row ─────────────────────────────────────── */
+  .list { overflow-y: auto; scrollbar-width: none; }
+  .list::-webkit-scrollbar { display: none; }
+  .row { display: flex; align-items: center; gap: 1rem; padding: .7rem 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .thumb { width: 64px; height: 64px; border-radius: 4px; object-fit: cover; flex-shrink: 0; background: #1a1a2e; }
+  .names { flex: 1; min-width: 0; }
+  .r-common { font-family: Georgia, serif; font-size: 1.5rem; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .r-sci { font-family: Georgia, serif; font-style: italic; font-size: .95rem; color: rgba(255,255,255,.55); margin-top: .15rem; }
+  .r-meta { text-align: right; white-space: nowrap; }
+  .r-time { font-size: 1rem; color: rgba(255,255,255,.75); }
+  .r-count { font-size: .8rem; color: rgba(255,255,255,.45); margin-top: .2rem; }
+  .eyebrow { font-size: .8rem; color: rgba(255,255,255,.6); letter-spacing: .04em; text-transform: uppercase; }
+  .close { font-size: .8rem; color: rgba(255,255,255,.6); letter-spacing: .04em; text-transform: uppercase; }
+  .fade-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 80px; pointer-events: none;
+                 background: linear-gradient(to bottom, transparent, rgba(0,0,0,.85)); }
+
+  /* ── A: full-screen veil ─────────────────────────────────── */
+  .veilA { position: absolute; inset: 0; z-index: 6; background: rgba(0,0,0,.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+           display: flex; flex-direction: column; padding: 1.2rem 0 0; }
+  .veilA .top { display: flex; justify-content: space-between; padding: 0 2rem 1rem; }
+  .veilA .list { flex: 1; padding: 0 max(2rem, calc(50% - 360px)) 3rem; }
+
+  /* ── B: side panel ───────────────────────────────────────── */
+  .scrimB { position: absolute; inset: 0; z-index: 6; background: linear-gradient(to left, rgba(0,0,0,.6), rgba(0,0,0,.15)); }
+  .panelB { position: absolute; top: 0; right: 0; bottom: 0; width: 48%; z-index: 7; background: rgba(10,10,10,.78);
+            backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); display: flex; flex-direction: column; }
+  .panelB .top { display: flex; justify-content: space-between; padding: 1.2rem 1.5rem 1rem; }
+  .panelB .list { flex: 1; padding: 0 1.5rem 3rem; }
+  .panelB .thumb { width: 56px; height: 56px; }
+  .panelB .r-common { font-size: 1.3rem; }
+
+  /* ── C: photo grid ───────────────────────────────────────── */
+  .veilC { position: absolute; inset: 0; z-index: 6; background: rgba(0,0,0,.72); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+           display: flex; flex-direction: column; padding-top: 1.2rem; }
+  .veilC .top { display: flex; justify-content: space-between; padding: 0 2rem 1rem; }
+  .gridC { flex: 1; overflow-y: auto; scrollbar-width: none; padding: 0 2rem 3rem; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; align-content: start; }
+  .tile { position: relative; aspect-ratio: 1; border-radius: 4px; overflow: hidden; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; }
+  .tile .lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 1.4rem .6rem .5rem; background: linear-gradient(transparent, rgba(0,0,0,.85)); }
+  .tile .lbl div:first-child { font-family: Georgia, serif; font-size: 1rem; line-height: 1.15; }
+  .tile .lbl div:last-child { font-size: .7rem; color: rgba(255,255,255,.6); margin-top: .15rem; }
+</style>
+</head>
+<body>
+<h1>"55 species today" → species list overlay</h1>
+<p class="sub">Mocked at iPad landscape size, using real images and today's species from the live display. The House Sparrow slide is what was on screen when someone tapped. The lists inside each frame actually scroll. Click the frame (or its heading) you like best, then reply in the terminal.</p>
+
+<div class="choice" data-choice="a" onclick="toggleSelect(this)">
+  <h2>A: Full-screen veil, centred list</h2>
+  <p>The current photo stays as a dimmed, blurred backdrop across the whole screen. A single column of rows sits in the middle with plenty of space on both sides. Feels the most like a museum wall label. Tap the ✕ or anywhere outside the list to close it.</p>
+  <div class="ipad">
+    <img class="photo" src="https://birdhouse.sgc.rayandhon.com/images/Passer_domesticus.jpg">
+    <div class="veilA">
+      <div class="top"><span class="eyebrow">Thursday 22 October · 55 species today</span><span class="close">Close ✕</span></div>
+      <div class="list" data-list></div>
+    </div>
+  </div>
+</div>
+
+<div class="choice" data-choice="b" onclick="toggleSelect(this)">
+  <h2>B: Side panel</h2>
+  <p>The list slides in from the right and covers about half the screen. The bird stays visible and sharp on the left, with its name still there. The type is a little smaller. Tap the left side to close it.</p>
+  <div class="ipad">
+    <img class="photo" src="https://birdhouse.sgc.rayandhon.com/images/Passer_domesticus.jpg">
+    <div class="grad"></div>
+    <div class="info"><div class="common">House Sparrow</div><div class="sci">Passer domesticus</div></div>
+    <div class="scrimB"></div>
+    <div class="panelB">
+      <div class="top"><span class="eyebrow">55 species today</span><span class="close">Close ✕</span></div>
+      <div class="list" data-list></div>
+    </div>
+  </div>
+</div>
+
+<div class="choice" data-choice="c" onclick="toggleSelect(this)">
+  <h2>C: Photo grid</h2>
+  <p>Same backdrop as A, but each species is a square photo tile with its name on top. The most visual of the three and good for browsing, but you can't see as many names at once and the scientific names drop out.</p>
+  <div class="ipad">
+    <img class="photo" src="https://birdhouse.sgc.rayandhon.com/images/Passer_domesticus.jpg">
+    <div class="veilC">
+      <div class="top"><span class="eyebrow">Thursday 22 October · 55 species today</span><span class="close">Close ✕</span></div>
+      <div class="gridC" data-grid></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const S = [
+    ["Dunlin","Calidris alpina","12:10 am",4],["House Sparrow","Passer domesticus","12:33 am",212],
+    ["Cedar Waxwing","Bombycilla cedrorum","12:41 am",38],["Red Crossbill","Loxia curvirostra","12:51 am",17],
+    ["Black-crowned Night Heron","Nycticorax nycticorax","2:36 am",9],["Belted Kingfisher","Megaceryle alcyon","2:41 am",6],
+    ["Long-eared Owl","Asio otus","2:56 am",3],["Northern Saw-whet Owl","Aegolius acadicus","3:28 am",1],
+    ["Golden-crowned Sparrow","Zonotrichia atricapilla","7:07 am",22],["American Crow","Corvus brachyrhynchos","7:08 am",140],
+    ["California Scrub-Jay","Aphelocoma californica","7:15 am",61],["Red-breasted Nuthatch","Sitta canadensis","7:24 am",19],
+    ["Anna's Hummingbird","Calypte anna","7:24 am",44],["Lesser Goldfinch","Spinus psaltria","7:24 am",73],
+    ["Golden-crowned Kinglet","Regulus satrapa","7:26 am",11],["Chestnut-backed Chickadee","Poecile rufescens","7:31 am",28]
+  ];
+  const img = s => "https://birdhouse.sgc.rayandhon.com/images/" + s[1].replace(/ /g, "_") + ".jpg";
+  const cnt = n => n === 1 ? "once" : n + "×";
+  document.querySelectorAll("[data-list]").forEach(el => {
+    el.innerHTML = S.map(s => `<div class="row"><img class="thumb" src="${img(s)}"><div class="names"><div class="r-common">${s[0]}</div><div class="r-sci">${s[1]}</div></div><div class="r-meta"><div class="r-time">${s[2]}</div><div class="r-count">${cnt(s[3])}</div></div></div>`).join("");
+  });
+  document.querySelectorAll("[data-grid]").forEach(el => {
+    el.innerHTML = S.map(s => `<div class="tile"><img src="${img(s)}"><div class="lbl"><div>${s[0]}</div><div>${s[2]}</div></div></div>`).join("");
+  });
+  if (typeof window.toggleSelect !== "function") {
+    window.toggleSelect = el => { document.querySelectorAll(".choice").forEach(c => c.classList.remove("selected")); el.classList.add("selected"); };
+  }
+</script>
+</body>
+</html>

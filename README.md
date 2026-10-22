@@ -58,8 +58,9 @@ Full-bleed photo carousel. Each slide:
 - Bottom gradient overlay for text legibility
 - Bottom-left: common name (large serif), scientific name (italic, links directly to the iNaturalist taxon page), detection count + last seen time
 - Bottom-right: first-seen time, slide counter ("3 of 12")
-- Top strip: date (left), species count (right)
+- Top strip: date (left), species count (right, tappable)
 - Progress bar along the bottom edge
+- Tap "N species today" to open a scrollable list of today's species over the current photo (thumbnail, names, first seen, count). Tap a bird to jump to its slide; tap ✕ or outside the list, press Esc, or wait 45 s to close it. The slideshow pauses while the list is open.
 - Click or tap anywhere to advance; swipe left/right on mobile
 
 ---
