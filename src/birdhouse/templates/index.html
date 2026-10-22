@@ -592,6 +592,7 @@
       const carousel   = document.getElementById('carousel');
       let current      = 0;
       let startTime    = null;
+      let overlayOpen  = false;
 
       // ── Carousel ──────────────────────────────────────────
 
@@ -603,6 +604,11 @@
       }
 
       function tick(ts) {
+        // Paused while the species list is open
+        if (overlayOpen) {
+          requestAnimationFrame(tick);
+          return;
+        }
         if (!startTime) startTime = ts;
         const elapsed = ts - startTime;
         progress.style.width = Math.min(elapsed / SLIDE_MS * 100, 100) + '%';
@@ -638,6 +644,86 @@
         }
       }, { passive: true });
 
+      // ── Species overlay ───────────────────────────────────
+
+      const OVERLAY_IDLE_MS = 45000;
+      const countButton  = document.getElementById('species-count');
+      const overlay      = document.getElementById('species-overlay');
+      const overlayList  = overlay.querySelector('.overlay__list');
+      const closeButton  = overlay.querySelector('.overlay__close');
+      const rows         = Array.from(overlay.querySelectorAll('.overlay__row'));
+      let idleTimer      = null;
+      let hideTimer      = null;
+      let reloadPending  = false;
+
+      function resetIdleTimer() {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(function () { closeOverlay(); }, OVERLAY_IDLE_MS);
+      }
+
+      function openOverlay() {
+        if (overlayOpen) return;
+        overlayOpen = true;
+        clearTimeout(hideTimer);
+        rows.forEach(function (row) {
+          row.classList.toggle('overlay__row--current', Number(row.dataset.index) === current);
+        });
+        overlay.hidden = false;
+        // Next frame, so the opacity transition runs from 0
+        requestAnimationFrame(function () { overlay.classList.add('overlay--open'); });
+        rows[current].scrollIntoView({ block: 'center' });
+        countButton.setAttribute('aria-expanded', 'true');
+        closeButton.focus({ preventScroll: true });
+        resetIdleTimer();
+      }
+
+      // jumpTo: slide index to show on close; omit to stay on the current slide
+      function closeOverlay(jumpTo) {
+        if (!overlayOpen) return;
+        overlayOpen = false;
+        clearTimeout(idleTimer);
+        overlay.classList.remove('overlay--open');
+        hideTimer = setTimeout(function () { overlay.hidden = true; }, 350);
+        countButton.setAttribute('aria-expanded', 'false');
+        countButton.focus({ preventScroll: true });
+        if (reloadPending) {
+          location.reload();
+          return;
+        }
+        if (typeof jumpTo === 'number') {
+          showSlide(jumpTo);
+        } else {
+          // Fresh full duration for the slide that was showing
+          startTime = performance.now();
+        }
+      }
+
+      countButton.addEventListener('click', openOverlay);
+      closeButton.addEventListener('click', function () { closeOverlay(); });
+
+      overlay.addEventListener('click', function (e) {
+        const row = e.target.closest('.overlay__row');
+        if (row) {
+          closeOverlay(Number(row.dataset.index));
+        } else if (!e.target.closest('.overlay__top')) {
+          // Veil or the empty margins around the list
+          closeOverlay();
+        }
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeOverlay();
+      });
+
+      ['touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
+        overlay.addEventListener(type, function () {
+          if (overlayOpen) resetIdleTimer();
+        }, { passive: true });
+      });
+      overlayList.addEventListener('scroll', function () {
+        if (overlayOpen) resetIdleTimer();
+      }, { passive: true });
+
       // ── Live data polling ──────────────────────────────────
 
       const initDateLabel     = {{ date_label | tojson }};
@@ -648,7 +734,9 @@
           .then(function (r) { return r.json(); })
           .then(function (d) {
             if (d.date_label !== initDateLabel || d.species_count !== initSpeciesCount) {
-              location.reload();
+              // Don't pull the list out from under someone reading it
+              if (overlayOpen) reloadPending = true;
+              else location.reload();
             }
           })
           .catch(function () { /* ignore network hiccups */ });

@@ -7,3 +7,4 @@ config.env
 *.env
 !config.example.env
 .DS_Store
+.superpowers/
