@@ -200,9 +200,15 @@
       pointer-events: auto;
       background: none;
       border: 0;
-      border-bottom: 1px solid rgba(255,255,255,0.35);
-      padding: 0 0 2px;
+      text-decoration: underline;
+      text-decoration-color: rgba(255,255,255,0.35);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 4px;
+      /* Finger-sized hit area (44px+) without moving the text */
+      padding: 14px 12px;
+      margin: -14px -12px;
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
     }
 
     /* ── Progress bar ─────────────────────────────────────── */
@@ -342,6 +348,7 @@
       padding: 0;
       cursor: pointer;
       white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
     }
 
     .overlay__list {
@@ -351,7 +358,7 @@
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
       /* Centred column; the side margins are tap-to-close space */
-      padding: 0 max(3rem, calc(50% - 360px)) 4rem;
+      padding: 0 max(3rem, calc(50% - 360px)) 6rem;
       -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
       mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
     }
@@ -368,6 +375,7 @@
       border: 0;
       border-bottom: 1px solid rgba(255,255,255,0.08);
       cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
       width: 100%;
       display: flex;
       align-items: center;
@@ -452,7 +460,7 @@
       }
 
       .overlay__list {
-        padding: 0 1.25rem 4rem;
+        padding: 0 1.25rem 6rem;
       }
 
       .overlay__thumb {
@@ -661,7 +669,14 @@
         idleTimer = setTimeout(function () { closeOverlay(); }, OVERLAY_IDLE_MS);
       }
 
-      function openOverlay() {
+      // Focus only moves for keyboard users: on the wall's touchscreen a
+      // programmatic focus can leave a visible focus ring behind.
+      // (A click with detail 0 came from the keyboard.)
+      function fromKeyboard(e) {
+        return !!e && e.detail === 0;
+      }
+
+      function openOverlay(e) {
         if (overlayOpen) return;
         overlayOpen = true;
         clearTimeout(hideTimer);
@@ -673,19 +688,21 @@
         requestAnimationFrame(function () { overlay.classList.add('overlay--open'); });
         rows[current].scrollIntoView({ block: 'center' });
         countButton.setAttribute('aria-expanded', 'true');
-        closeButton.focus({ preventScroll: true });
+        if (fromKeyboard(e)) closeButton.focus({ preventScroll: true });
         resetIdleTimer();
       }
 
       // jumpTo: slide index to show on close; omit to stay on the current slide
-      function closeOverlay(jumpTo) {
+      // restoreFocus: return focus to the count button (keyboard closes only)
+      function closeOverlay(jumpTo, restoreFocus) {
         if (!overlayOpen) return;
         overlayOpen = false;
         clearTimeout(idleTimer);
         overlay.classList.remove('overlay--open');
         hideTimer = setTimeout(function () { overlay.hidden = true; }, 350);
         countButton.setAttribute('aria-expanded', 'false');
-        countButton.focus({ preventScroll: true });
+        if (restoreFocus) countButton.focus({ preventScroll: true });
+        else if (overlay.contains(document.activeElement)) document.activeElement.blur();
         if (reloadPending) {
           location.reload();
           return;
@@ -699,12 +716,12 @@
       }
 
       countButton.addEventListener('click', openOverlay);
-      closeButton.addEventListener('click', function () { closeOverlay(); });
+      closeButton.addEventListener('click', function (e) { closeOverlay(undefined, fromKeyboard(e)); });
 
       overlay.addEventListener('click', function (e) {
         const row = e.target.closest('.overlay__row');
         if (row) {
-          closeOverlay(Number(row.dataset.index));
+          closeOverlay(Number(row.dataset.index), fromKeyboard(e));
         } else if (!e.target.closest('.overlay__top')) {
           // Veil or the empty margins around the list
           closeOverlay();
@@ -712,7 +729,7 @@
       });
 
       document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') closeOverlay();
+        if (e.key === 'Escape') closeOverlay(undefined, true);
       });
 
       ['touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
@@ -723,6 +740,23 @@
       overlayList.addEventListener('scroll', function () {
         if (overlayOpen) resetIdleTimer();
       }, { passive: true });
+
+      // iOS rubber-bands the whole page when a drag can't scroll the list
+      // (top bar, or past either end); block those so the wall stays still
+      let dragStartY = 0;
+      overlay.addEventListener('touchstart', function (e) {
+        dragStartY = e.touches[0].clientY;
+      }, { passive: true });
+      overlay.addEventListener('touchmove', function (e) {
+        if (!e.target.closest('.overlay__list')) {
+          e.preventDefault();
+          return;
+        }
+        const dy       = e.touches[0].clientY - dragStartY;
+        const atTop    = overlayList.scrollTop <= 0;
+        const atBottom = overlayList.scrollTop + overlayList.clientHeight >= overlayList.scrollHeight - 1;
+        if ((dy > 0 && atTop) || (dy < 0 && atBottom)) e.preventDefault();
+      }, { passive: false });
 
       // ── Live data polling ──────────────────────────────────
 
