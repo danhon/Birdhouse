@@ -21,6 +21,10 @@ services:
       # BIRDNET_DB_HOST_PATH is the path on the host; the app always
       # sees the DB at /data/birdnet.db inside the container.
       - ${BIRDNET_DB_HOST_PATH}:/data/birdnet.db:ro
+      # BirdNET-Go's species taxonomy (read-only), used to show birds only.
+      # If missing, the app falls back to hiding BirdNET's non-bird sound
+      # classes (Engine, Dog, ...) and lets other non-bird animals through.
+      - ${BIRDNET_TAXONOMY_HOST_PATH:-/home/danhon/birdnet-go-app/config/models/shared/taxonomy.csv}:/data/taxonomy.csv:ro
       # Cached species photos (persist across rebuilds)
       - birdhouse-images:/app/data/image-cache
 

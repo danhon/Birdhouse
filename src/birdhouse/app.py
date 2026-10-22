@@ -9,6 +9,7 @@ to disk). Fetches common names from the BirdNET-Go REST API.
 from __future__ import annotations
 
 import base64
+import csv
 import json
 import logging
 import os
@@ -47,6 +48,7 @@ class Config:
     poll_interval: int
     slide_duration: int
     vision_enabled: bool
+    taxonomy_path: Optional[Path] = None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -62,6 +64,11 @@ class Config:
             # Smart photo cropping (focal-point-aware object-position) is only
             # enabled when a key is present; otherwise slides use a center crop.
             vision_enabled=bool(os.environ.get("ANTHROPIC_API_KEY")),
+            # BirdNET-Go's taxonomy.csv, used to keep only birds (class aves).
+            taxonomy_path=Path(os.environ.get(
+                "BIRDNET_TAXONOMY_PATH",
+                "/home/danhon/birdnet-go-app/config/models/shared/taxonomy.csv",
+            )),
         )
 
 
@@ -117,6 +124,11 @@ def query_today_from_db(
     Returns a list of (scientific_name, first_seen_unix_ts, last_seen_unix_ts,
     detection_count) sorted by first detection time ascending, filtered to
     detections at or above min_confidence.
+
+    BirdNET-Go keeps one label per (scientific_name, model) and runs several
+    models at once, so rows are grouped by scientific name rather than label.
+    The count sums every model's detections; BirdNET-Go doesn't log the same
+    call twice across models, so in practice that's a count of distinct events.
     """
     ts_start, ts_end = _day_bounds(tz)
     try:
@@ -131,7 +143,7 @@ def query_today_from_db(
             JOIN labels l ON l.id = d.label_id
             WHERE d.detected_at BETWEEN ? AND ?
               AND d.confidence >= ?
-            GROUP BY d.label_id
+            GROUP BY l.scientific_name
             ORDER BY first_seen ASC
             """,
             (ts_start, ts_end, min_confidence),
@@ -141,6 +153,44 @@ def query_today_from_db(
     except Exception as exc:
         log.error("DB query failed: %s", exc)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Birds-only filter
+# ---------------------------------------------------------------------------
+
+# BirdNET v2.4's non-bird sound classes. BirdNET-Go labels them as species of
+# class Aves, so DB metadata can't filter them out. Used only when
+# taxonomy.csv is unavailable, so a missing mount degrades rather than empties
+# the page (non-bird animals from other models get through in that case).
+NON_BIRD_SOUND_CLASSES = frozenset({
+    "Engine", "Dog", "Fireworks", "Gun", "Siren", "Power tools",
+    "Human vocal", "Human non-vocal", "Human whistle",
+})
+
+
+def load_bird_names(taxonomy_path: Optional[Path]) -> Optional[frozenset[str]]:
+    """
+    Return the scientific names in BirdNET-Go's taxonomy.csv whose class_name
+    is "aves", or None if the file is missing or unreadable.
+    """
+    if taxonomy_path is None:
+        return None
+    try:
+        with open(taxonomy_path, newline="", encoding="utf-8") as f:
+            return frozenset(
+                row["sci_name"] for row in csv.DictReader(f)
+                if row.get("class_name") == "aves"
+            )
+    except (OSError, KeyError, csv.Error) as exc:
+        log.warning("Taxonomy unavailable (%s); falling back to sound-class denylist", exc)
+        return None
+
+
+def is_bird(scientific_name: str, bird_names: Optional[frozenset[str]]) -> bool:
+    if bird_names is None:
+        return scientific_name not in NON_BIRD_SOUND_CLASSES
+    return scientific_name in bird_names
 
 
 # ---------------------------------------------------------------------------
@@ -495,12 +545,19 @@ def _date_label(tz: ZoneInfo) -> str:
     return datetime.now(tz).strftime("%A %-d %B %Y")
 
 
-def _refresh(config: Config, http: requests.Session, vision_client: Optional[anthropic.Anthropic]) -> None:
+def _refresh(
+    config: Config,
+    http: requests.Session,
+    vision_client: Optional[anthropic.Anthropic],
+    bird_names: Optional[frozenset[str]] = None,
+) -> None:
     """Fetch today's data from the DB, images from iNaturalist, update store."""
     log.info("Refreshing from DB: %s", config.birdnet_db_path)
 
     rows = query_today_from_db(config.birdnet_db_path, config.timezone, config.min_confidence)
     log.info("DB returned %d unique species", len(rows))
+    rows = [r for r in rows if is_bird(r[0], bird_names)]
+    log.info("%d after birds-only filter", len(rows))
 
     # Top up the common name cache for any species we haven't seen before
     unknown = _name_cache.missing([sci for sci, *_ in rows])
@@ -538,11 +595,15 @@ def start_background_poller(config: Config) -> None:
     # anthropic.Anthropic() reads ANTHROPIC_API_KEY from the environment itself;
     # only constructed when a key is present, per config.vision_enabled.
     vision_client = anthropic.Anthropic() if config.vision_enabled else None
+    # Loaded once: taxonomy.csv only changes when BirdNET-Go is upgraded.
+    bird_names = load_bird_names(config.taxonomy_path)
+    if bird_names is not None:
+        log.info("Loaded %d bird names from %s", len(bird_names), config.taxonomy_path)
 
     def loop() -> None:
         while True:
             try:
-                _refresh(config, http, vision_client)
+                _refresh(config, http, vision_client, bird_names)
             except Exception:
                 log.exception("Unhandled error in refresh loop")
             time.sleep(config.poll_interval)
@@ -583,6 +644,15 @@ def create_app(config: Optional[Config] = None) -> Flask:
             "species_count": len(species),
             "last_updated": last_updated,
         })
+
+    @app.route("/favicon.ico")
+    def favicon():
+        return app.send_static_file("favicon.ico")
+
+    @app.route("/apple-touch-icon.png")
+    @app.route("/apple-touch-icon-precomposed.png")
+    def apple_touch_icon():
+        return app.send_static_file("apple-touch-icon.png")
 
     @app.route("/images/<path:filename>")
     def images(filename: str):

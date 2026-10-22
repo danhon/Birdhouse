@@ -9,7 +9,7 @@ Live at: `https://birdhouse.sgc.rayandhon.com` (public, no authentication)
 ## What it does
 
 - Queries the BirdNET-Go SQLite database directly every 60 seconds
-- Shows each unique species once, ordered by first detection time today
+- Shows each unique bird species once, ordered by first detection time today — merged across all of BirdNET-Go's models, with non-birds (mammals, frogs, BirdNET's `Engine`/`Dog`/... sound classes) hidden
 - Displays a full-bleed species photo (from iNaturalist, cached to disk), common name, scientific name, first-seen time, last-seen time, and detection count
 - Optionally uses Claude vision to crop each photo around the bird itself rather than the frame center (requires `ANTHROPIC_API_KEY`; falls back to a center crop without it)
 - Automatically reloads when a new species appears or the date rolls over
@@ -34,16 +34,19 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
 ### Data flow
 
 1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
-2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending.
-3. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id, focus)`.
-4. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
-5. When `ANTHROPIC_API_KEY` is set, `fetch_species_image()` also computes a crop focal point via a one-time Claude vision call (see "Smart photo cropping" below), cached to disk like everything else.
-6. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
-7. `GET /` renders `index.html` with the current store snapshot.
-8. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
-9. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
+2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending. BirdNET-Go runs several models at once (BirdNET v2.4, BirdNET v3.0, Perch v2) and keeps a separate label per model, so rows are grouped by `scientific_name`, not `label_id`. The count sums every model's detections; BirdNET-Go doesn't log one call twice across models, so that is effectively a count of distinct events.
+3. Drops anything that isn't a bird: only names whose `class_name` is `aves` in BirdNET-Go's `taxonomy.csv` (loaded once at startup) are kept. BirdNET v2.4's sound classes are stored as Aves in the DB, so the label metadata can't be used for this. If the taxonomy file is missing, a hard-coded denylist of those sound classes is used instead, and non-bird animals get through.
+4. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id, focus)`.
+5. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
+6. When `ANTHROPIC_API_KEY` is set, `fetch_species_image()` also computes a crop focal point via a one-time Claude vision call (see "Smart photo cropping" below), cached to disk like everything else.
+7. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
+8. `GET /` renders `index.html` with the current store snapshot.
+9. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
+10. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
 
 **"Today"** = calendar date in the timezone set by `TZ` env var.
+
+**Freshness:** the DB is opened with `immutable=1` and only `birdnet.db` is mounted (not its `-wal` file), so detections show up once BirdNET-Go checkpoints the WAL — usually a few minutes behind. That's accepted for a slideshow. Because the mount is a single file, restoring BirdNET-Go's DB from a backup (a new file) needs a Birdhouse restart.
 
 ---
 
@@ -75,11 +78,13 @@ Birdhouse/
 ├── .gitignore               ← .env, data/, image-cache/ gitignored
 ├── src/
 │   └── birdhouse/
-│       ├── app.py           ← Flask app, DB query, image cache, polling
+│       ├── app.py           ← Flask app, DB query, birds-only filter, image cache, polling
+│       ├── static/          ← favicon.ico, apple-touch-icon.png
 │       └── templates/
 │           └── index.html   ← carousel template
 ├── tests/
 │   ├── test_db.py
+│   ├── test_taxonomy.py
 │   ├── test_app.py
 │   ├── test_detections.py
 │   ├── test_image_cache.py
@@ -99,6 +104,8 @@ Copy `.env.example` to `.env` and fill in values. All variables:
 | `BIRDNET_BASE_URL` | `http://192.168.1.100:8888` | BirdNET-Go API (for common name seeding) |
 | `BIRDNET_DB_HOST_PATH` | — | **Host** path to BirdNET-Go SQLite DB (Docker mount source) |
 | `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
+| `BIRDNET_TAXONOMY_HOST_PATH` | `~/birdnet-go-app/config/models/shared/taxonomy.csv` | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
+| `BIRDNET_TAXONOMY_PATH` | `/data/taxonomy.csv` | Path inside the container (do not change) |
 | `PORT` | `8090` | Port the app listens on |
 | `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to display |
 | `IMAGE_CACHE_DIR` | `/app/data/image-cache` | Species photo cache (backed by Docker volume) |

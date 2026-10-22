@@ -147,3 +147,15 @@ class TestDataJsonRoute:
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
         data = client.get("/data.json").get_json()
         assert "last_updated" in data
+
+
+class TestIcons:
+    @pytest.mark.parametrize("path", [
+        "/favicon.ico",
+        "/apple-touch-icon.png",
+        "/apple-touch-icon-precomposed.png",
+    ])
+    def test_icon_served(self, client, path):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.data

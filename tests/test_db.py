@@ -48,6 +48,9 @@ def db_path(tmp_path) -> Path:
         INSERT INTO labels VALUES (1, 'Corvus brachyrhynchos', 1, 1, 1, '');
         INSERT INTO labels VALUES (2, 'Haemorhous mexicanus',  1, 1, 1, '');
         INSERT INTO labels VALUES (3, 'Setophaga townsendi',   1, 1, 1, '');
+        -- BirdNET-Go stores one label per (scientific_name, model_id)
+        INSERT INTO labels VALUES (4, 'Corvus brachyrhynchos', 2, 1, 1, '');
+        INSERT INTO labels VALUES (5, 'Corvus brachyrhynchos', 4, 1, 1, '');
 
         INSERT INTO image_caches VALUES (1, 'wikimedia', 1, 'https://example.com/crow.jpg', '');
         INSERT INTO image_caches VALUES (2, 'avicommons', 2, 'https://avicommons.org/finch.jpg', '');
@@ -151,3 +154,11 @@ class TestQueryTodayFromDb:
         rows = query_today_from_db(tmp_path / "nonexistent.db", TZ)
         assert rows == []
 
+
+    def test_merges_same_species_across_models(self, db_path):
+        _insert_detection(db_path, label_id=1, detected_at=_today_ts(9))
+        _insert_detection(db_path, label_id=4, detected_at=_today_ts(7))
+        _insert_detection(db_path, label_id=4, detected_at=_today_ts(8))
+        _insert_detection(db_path, label_id=5, detected_at=_today_ts(12))
+        rows = query_today_from_db(db_path, TZ)
+        assert rows == [("Corvus brachyrhynchos", _today_ts(7), _today_ts(12), 4)]
