@@ -191,10 +191,18 @@
     }
 
     .header__count {
+      font: inherit;
       font-size: clamp(0.85rem, 1.5vw, 1rem);
       color: rgba(255,255,255,0.6);
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      /* The one tappable thing in the header: opens the species list */
+      pointer-events: auto;
+      background: none;
+      border: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.35);
+      padding: 0 0 2px;
+      cursor: pointer;
     }
 
     /* ── Progress bar ─────────────────────────────────────── */
@@ -288,6 +296,182 @@
 
     }
 
+    /* ── Species list overlay ─────────────────────────────── */
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.72);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      transition: opacity 0.35s ease-in-out;
+    }
+
+    .overlay[hidden] {
+      display: none;
+    }
+
+    .overlay--open {
+      opacity: 1;
+    }
+
+    .overlay__top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 2rem;
+      padding: 1.5rem 3rem 1rem;
+    }
+
+    .overlay__label,
+    .overlay__close {
+      font: inherit;
+      font-size: clamp(0.85rem, 1.5vw, 1rem);
+      color: rgba(255,255,255,0.6);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .overlay__close {
+      background: none;
+      border: 0;
+      padding: 0;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .overlay__list {
+      flex: 1;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      /* Centred column; the side margins are tap-to-close space */
+      padding: 0 max(3rem, calc(50% - 360px)) 4rem;
+      -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
+      mask-image: linear-gradient(to bottom, #000 calc(100% - 5rem), transparent);
+    }
+
+    .overlay__list::-webkit-scrollbar {
+      display: none;
+    }
+
+    .overlay__row {
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      background: none;
+      border: 0;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.7rem 0.5rem;
+    }
+
+    .overlay__row--current {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .overlay__thumb {
+      width: 64px;
+      height: 64px;
+      flex-shrink: 0;
+      border-radius: 4px;
+      object-fit: cover;
+      /* object-position is set inline per row, matching the slide */
+    }
+
+    .overlay__thumb--empty {
+      display: block;
+      background: #1a1a2e;
+    }
+
+    .overlay__names {
+      display: block;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .overlay__common {
+      display: block;
+      font-family: "Georgia", "Times New Roman", serif;
+      font-size: clamp(1.2rem, 2.4vw, 1.5rem);
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .overlay__scientific {
+      display: block;
+      font-family: "Georgia", "Times New Roman", serif;
+      font-size: clamp(0.85rem, 1.4vw, 0.95rem);
+      font-style: italic;
+      color: rgba(255, 255, 255, 0.65);
+      margin-top: 0.15rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .overlay__meta {
+      display: block;
+      text-align: right;
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .overlay__time {
+      display: block;
+      font-size: clamp(0.85rem, 1.5vw, 1rem);
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    .overlay__count {
+      display: block;
+      font-size: clamp(0.75rem, 1.2vw, 0.8rem);
+      color: rgba(255, 255, 255, 0.45);
+      margin-top: 0.2rem;
+    }
+
+    @media (max-width: 600px) {
+      .overlay__top {
+        padding: 0.9rem 1.25rem 0.75rem;
+      }
+
+      .overlay__label,
+      .overlay__close {
+        font-size: clamp(0.7rem, 3vw, 0.9rem);
+      }
+
+      .overlay__list {
+        padding: 0 1.25rem 4rem;
+      }
+
+      .overlay__thumb {
+        width: 48px;
+        height: 48px;
+      }
+
+      .overlay__row {
+        gap: 0.75rem;
+        padding: 0.6rem 0.25rem;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .overlay {
+        transition: none;
+      }
+    }
+
     /* ── Empty state ──────────────────────────────────────── */
 
     .empty {
@@ -316,7 +500,8 @@
 
   <div class="header">
     <span class="header__date">{{ date_label }}</span>
-    <span class="header__count">{{ species|length }} species today</span>
+    <button class="header__count" id="species-count" type="button"
+            aria-expanded="false" aria-controls="species-overlay">{{ species|length }} species today</button>
   </div>
 
   <div class="carousel" id="carousel">
@@ -364,6 +549,39 @@
      href="https://www.inaturalist.org"
      target="_blank"
      rel="noopener noreferrer">Photos via iNaturalist</a>
+
+  <div class="overlay" id="species-overlay" hidden
+       role="dialog" aria-modal="true" aria-label="Species detected today">
+    <div class="overlay__top">
+      <span class="overlay__label">{{ date_label }} · {{ species|length }} species today</span>
+      <button class="overlay__close" type="button">Close ✕</button>
+    </div>
+    <div class="overlay__list">
+      {% for sp in species %}
+      <button class="overlay__row" data-index="{{ loop.index0 }}" type="button">
+        {% if sp.image_path %}
+          <img class="overlay__thumb"
+               src="/images/{{ sp.image_path }}"
+               alt=""
+               loading="lazy"
+               draggable="false"
+               style="object-position: {{ (sp.focus_x*100)|round(1) }}% {{ (sp.focus_y*100)|round(1) }}%">
+        {% else %}
+          <span class="overlay__thumb overlay__thumb--empty"></span>
+        {% endif %}
+        <span class="overlay__names">
+          <span class="overlay__common">{{ sp.common_name }}</span>
+          <span class="overlay__scientific">{{ sp.scientific_name }}</span>
+        </span>
+        <span class="overlay__meta">
+          <span class="overlay__time">{{ sp.first_seen }}</span>
+          <span class="overlay__count">{% if sp.detection_count == 1 %}once{% else %}{{ sp.detection_count }}×{% endif %}</span>
+        </span>
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+  <!-- /overlay -->
 
   <script>
     (function () {

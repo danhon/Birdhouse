@@ -1,5 +1,7 @@
 """Tests for the Flask app routes."""
 
+import re
+
 import pytest
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -108,6 +110,77 @@ class TestIndexRoute:
         data = client.get("/").data
         assert b"detected once today" in data
         assert b"last seen 8:00 am" in data
+
+
+# ---------------------------------------------------------------------------
+# Species list overlay
+# ---------------------------------------------------------------------------
+
+def _overlay_html(data: bytes) -> str:
+    """Return just the overlay's markup, so slide content can't leak into checks."""
+    html = data.decode()
+    start = html.index('id="species-overlay"')
+    end = html.index("<!-- /overlay -->", start)
+    return html[start:end]
+
+
+class TestSpeciesOverlay:
+    def test_count_is_a_button(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        data = client.get("/").data.decode()
+        assert re.search(r'<button[^>]*id="species-count"', data)
+        assert "1 species today" in data
+
+    def test_one_row_per_species_in_carousel_order(self, client):
+        _load_store([
+            Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3),
+            Species("House Finch",   "Haemorhous mexicanus",  "9:00 am", 7),
+        ])
+        overlay = _overlay_html(client.get("/").data)
+        assert re.findall(r'class="overlay__row[^"]*" data-index="(\d+)"', overlay) == ["0", "1"]
+        assert overlay.index("American Crow") < overlay.index("House Finch")
+
+    def test_row_thumbnail_matches_slide(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             image_path="Corvus_brachyrhynchos.jpg", focus_x=0.33, focus_y=0.21)])
+        overlay = _overlay_html(client.get("/").data)
+        assert 'src="/images/Corvus_brachyrhynchos.jpg"' in overlay
+        assert "object-position: 33.0% 21.0%" in overlay
+
+    def test_row_placeholder_without_image(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             image_path=None)])
+        assert "overlay__thumb--empty" in _overlay_html(client.get("/").data)
+
+    def test_row_count_once_and_times(self, client):
+        _load_store([
+            Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1),
+            Species("House Finch",   "Haemorhous mexicanus",  "9:00 am", 212),
+        ])
+        overlay = _overlay_html(client.get("/").data)
+        assert ">once<" in overlay
+        assert ">212×<" in overlay
+
+    def test_row_shows_first_seen_and_scientific(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        overlay = _overlay_html(client.get("/").data)
+        assert "8:00 am" in overlay
+        assert "Corvus brachyrhynchos" in overlay
+
+    def test_overlay_has_no_inaturalist_links(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             inat_id=123)])
+        overlay = _overlay_html(client.get("/").data)
+        assert "inaturalist.org" not in overlay
+        assert "<a " not in overlay
+
+    def test_overlay_closed_by_default(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        data = client.get("/").data.decode()
+        assert re.search(r'id="species-overlay"[^>]*\bhidden\b', data)
+
+    def test_no_overlay_in_empty_state(self, client):
+        assert b"species-overlay" not in client.get("/").data
 
 
 # ---------------------------------------------------------------------------
