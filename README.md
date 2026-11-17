@@ -102,7 +102,7 @@ Copy `.env.example` to `.env` and fill in values. All variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BIRDNET_BASE_URL` | `http://192.168.1.100:8888` | BirdNET-Go API (for common name seeding) |
+| `BIRDNET_BASE_URL` | `http://birdnet-go:8080` | BirdNET-Go API (for common name seeding), over `traefik_default`; host port 8888 is bound to 127.0.0.1 only (reverse-proxy#94) |
 | `BIRDNET_DB_HOST_PATH` | — | **Host** path to BirdNET-Go SQLite DB (Docker mount source) |
 | `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
 | `BIRDNET_TAXONOMY_HOST_PATH` | `~/birdnet-go-app/config/models/shared/taxonomy.csv` | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
