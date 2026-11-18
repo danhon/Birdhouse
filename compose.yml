@@ -9,6 +9,11 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${SERVICE_HOST}`)"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
+      # Public, with no Authelia: the fleet's public middlewares (reverse-proxy
+      # decisions/015, NET-4). public-guard caps requests in flight per Host
+      # against crawler swarms; public-compress gzips text. There is no
+      # /healthz yet (Birdhouse#7), so no health router outside the cap.
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=public-guard@file,public-compress@file"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=${PORT:-8090}"
       - "homepage.group=Birds"
       - "homepage.name=Birdhouse"
