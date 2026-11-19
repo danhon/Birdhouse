@@ -141,6 +141,13 @@ See [python-apps.md](../reverse-proxy/docs-site/docs/services/python-apps.md) fo
 
 ---
 
+### Backups
+
+The `birdhouse-images` volume (the image cache, with any hand-edited
+`.focus` files) is copied off-box nightly by the fleet's restic job, since
+2026-11-18 (reverse-proxy#82). The database is BirdNET-Go's, backed up with
+BirdNET-Go.
+
 ## Development
 
 ```bash
