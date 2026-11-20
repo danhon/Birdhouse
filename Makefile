@@ -24,6 +24,8 @@ HOST   ?= $(APP).$(DOMAIN)
 deploy:
 	COMPOSE_PROJECT_NAME=$(APP) \
 	SERVICE_HOST=$(HOST) \
+	GIT_SHA=$$(git rev-parse --short HEAD) \
+	BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 	docker compose up -d --build
 
 preview:

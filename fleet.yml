@@ -17,7 +17,6 @@ waivers:
     yet, bootstrap: true}
 - {check: venv-cache, until: 2026-12-15, issue: 7, why: Dockerfile predates the .venv
     cache rules, bootstrap: true}
-- {check: build-sha, until: 2026-12-15, issue: 7, why: image records no commit, bootstrap: true}
 - {check: clean-deploy, until: 2026-12-15, issue: 7, why: checkout not clean or not
     at the running commit, bootstrap: true}
 - {check: unit-onfailure, until: 2026-12-15, issue: 7, why: units predate decisions/025,

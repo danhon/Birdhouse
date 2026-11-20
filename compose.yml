@@ -6,7 +6,9 @@ services:
       options:
         tag: "{{.Name}}"
         labels: com.docker.compose.project
-    build: .
+    build:
+      context: .
+      args: [GIT_SHA, BUILD_TIME]   # from the Makefile (IMG-3)
     env_file: .env
     networks: [traefik_default]
     restart: unless-stopped

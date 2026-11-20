@@ -17,4 +17,11 @@ COPY README.md ./
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 
+# The commit this image was built from (IMG-3, reverse-proxy#122): the
+# nightly rebuild only rebuilds an image that records it.
+ARG GIT_SHA=dev
+ARG BUILD_TIME=
+ENV BUILD_SHA="${GIT_SHA}" \
+    BUILD_TIME="${BUILD_TIME}"
+
 CMD ["uv", "run", "birdhouse"]
