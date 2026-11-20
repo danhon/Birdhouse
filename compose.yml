@@ -1,5 +1,11 @@
 services:
   app:
+    # LOG-3: to the journal; VictoriaLogs shows it as source:<compose project>.
+    logging:
+      driver: journald
+      options:
+        tag: "{{.Name}}"
+        labels: com.docker.compose.project
     build: .
     env_file: .env
     networks: [traefik_default]
