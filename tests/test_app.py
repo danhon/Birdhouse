@@ -232,3 +232,26 @@ class TestIcons:
         resp = client.get(path)
         assert resp.status_code == 200
         assert resp.data
+
+
+def test_healthz_answers_with_status_and_build(client, monkeypatch):
+    monkeypatch.setenv("BUILD_SHA", "abc1234")
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.get_json() == {"status": "ok", "build": "abc1234"}
+
+
+def test_the_access_line_has_the_path_and_never_the_query(client, caplog):
+    caplog.set_level("INFO", logger="birdhouse.access")
+    client.get("/data.json?token=secret")
+    [rec] = [r for r in caplog.records if r.name == "birdhouse.access"]
+    assert rec.getMessage().startswith("GET /data.json 200 ")
+    assert "secret" not in rec.getMessage() and rec.path == "/data.json"
+
+
+def test_health_and_assets_are_logged_only_when_they_fail(client, caplog):
+    caplog.set_level("INFO", logger="birdhouse.access")
+    client.get("/healthz")
+    client.get("/images/nope.jpg")
+    lines = [r.getMessage() for r in caplog.records if r.name == "birdhouse.access"]
+    assert len(lines) == 1 and lines[0].startswith("GET /images/nope.jpg 404 ")

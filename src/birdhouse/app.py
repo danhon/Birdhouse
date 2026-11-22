@@ -25,9 +25,16 @@ from zoneinfo import ZoneInfo
 
 import anthropic
 import requests
-from flask import Flask, jsonify, render_template, send_from_directory
+from flask import Flask, g, jsonify, render_template, request, send_from_directory
+
+from birdhouse import logs
 
 log = logging.getLogger(__name__)
+access_log = logging.getLogger("birdhouse.access")
+
+# Requests logged only when they fail: the health probe, and the page's own
+# assets, which every open carousel fetches again and again.
+QUIET_PATHS = ("/healthz", "/static/", "/images/", "/favicon.ico", "/apple-touch-icon")
 
 INATURALIST_API = "https://api.inaturalist.org/v1/taxa"
 _SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_-]")
@@ -623,6 +630,29 @@ def create_app(config: Optional[Config] = None) -> Flask:
     app = Flask(__name__, template_folder="templates")
     app.config["BIRDHOUSE_CONFIG"] = config
 
+    @app.before_request
+    def start_timer():
+        g.started = time.monotonic()
+
+    @app.after_request
+    def access_line(response):
+        # The path only: never the query string or the visitor's address (LOG-2),
+        # which werkzeug's own access line carried. logs.py quiets that one.
+        path = request.path
+        if response.status_code >= 400 or not path.startswith(QUIET_PATHS):
+            ms = int((time.monotonic() - g.get("started", time.monotonic())) * 1000)
+            level = logging.ERROR if response.status_code >= 500 else logging.INFO
+            access_log.log(level, "%s %s %d %dms", request.method, path, response.status_code, ms,
+                           extra={"method": request.method, "path": path,
+                                  "status": response.status_code, "ms": ms})
+        return response
+
+    @app.route("/healthz")
+    def healthz():
+        # HEALTH-1, HEALTH-2: 200 whenever the process can serve; no
+        # application data. Its own router skips public-guard (NET-4).
+        return jsonify({"status": "ok", "build": os.environ.get("BUILD_SHA", "dev")})
+
     @app.route("/")
     def index():
         species, date_label, last_updated = _store.snapshot()
@@ -667,10 +697,10 @@ def create_app(config: Optional[Config] = None) -> Flask:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # LOG-1: text on stdout, JSON lines in /logs/app.log when ~/birdhouse-logs
+    # is mounted there (compose.yml).
+    logs.setup(os.environ.get("BUILD_SHA", "dev")[:7],
+               "/logs/app.log" if Path("/logs").is_dir() else None)
 
     config = Config.from_env()
     config.image_cache_dir.mkdir(parents=True, exist_ok=True)

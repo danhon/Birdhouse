@@ -8,12 +8,14 @@ ENV UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 
 # Install dependencies as a cached layer — only rebuilds when
-# pyproject.toml or uv.lock changes, not on every source edit.
+# pyproject.toml or uv.lock changes, not on every source edit (PY-1). An
+# empty README: hatchling needs the file, and the real one would rebuild
+# this layer on every README edit.
 COPY pyproject.toml uv.lock ./
+RUN touch README.md
 RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy source and install the project itself
-COPY README.md ./
 COPY src/ ./src/
 RUN uv sync --frozen --no-dev
 
@@ -24,4 +26,6 @@ ARG BUILD_TIME=
 ENV BUILD_SHA="${GIT_SHA}" \
     BUILD_TIME="${BUILD_TIME}"
 
-CMD ["uv", "run", "birdhouse"]
+# The .venv's own script, not `uv run`, which syncs at every start (PY-1).
+ENV PATH="/app/.venv/bin:${PATH}"
+CMD ["birdhouse"]

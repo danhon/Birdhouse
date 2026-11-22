@@ -15,22 +15,28 @@ deploy install-units: fleet-missing
 .DEFAULT_GOAL := $(_FLEET_SAVED_GOAL)
 endif
 
-APP    ?= birdhouse
-DOMAIN ?= sgc.rayandhon.com
-HOST   ?= $(APP).$(DOMAIN)
+APP     ?= birdhouse
+DOMAIN  ?= sgc.rayandhon.com
+HOST    ?= $(APP).$(DOMAIN)
+LOG_DIR ?= $(HOME)/$(APP)-logs
 
 .PHONY: deploy preview logs stop
 
 deploy:
+	mkdir -p $(LOG_DIR)
 	COMPOSE_PROJECT_NAME=$(APP) \
 	SERVICE_HOST=$(HOST) \
+	BIRDHOUSE_LOG_DIR=$(LOG_DIR) \
 	GIT_SHA=$$(git rev-parse --short HEAD) \
 	BUILD_TIME=$$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-	docker compose up -d --build
+	docker compose up -d --build --wait
+	@$(FLEET_PROBE)
 
 preview:
+	mkdir -p $(HOME)/$(APP)-preview-logs
 	COMPOSE_PROJECT_NAME=$(APP)-preview \
 	SERVICE_HOST=$(APP)-preview.$(DOMAIN) \
+	BIRDHOUSE_LOG_DIR=$(HOME)/$(APP)-preview-logs \
 	docker compose up -d --build
 
 logs:

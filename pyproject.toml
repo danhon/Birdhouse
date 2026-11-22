@@ -23,6 +23,9 @@ birdhouse = "birdhouse.app:main"
 
 [tool.uv]
 package = true
+# A src layout: without this the second uv sync records a key for src/ that
+# changes every build, so the .venv copy is never reused (PY-1).
+cache-keys = [{ file = "pyproject.toml" }, { file = "uv.lock" }]
 
 [build-system]
 requires = ["hatchling"]

@@ -79,7 +79,9 @@ Birdhouse/
 ├── .gitignore               ← .env, data/, image-cache/ gitignored
 ├── src/
 │   └── birdhouse/
-│       ├── app.py           ← Flask app, DB query, birds-only filter, image cache, polling
+│       ├── app.py           ← Flask app, DB query, birds-only filter, image cache, polling, /healthz
+│       ├── logs.py          ← the fleet log format: text on stdout, JSON in ~/birdhouse-logs/app.log
+│       ├── healthcheck.py   ← compose's health probe of /healthz
 │       ├── static/          ← favicon.ico, apple-touch-icon.png
 │       └── templates/
 │           └── index.html   ← carousel template
@@ -89,10 +91,13 @@ Birdhouse/
 │   ├── test_app.py
 │   ├── test_detections.py
 │   ├── test_image_cache.py
-│   └── test_focus_point.py
-└── systemd/
-    └── birdhouse.service    ← legacy; superseded by Docker Compose
+│   ├── test_focus_point.py
+│   ├── test_logs.py
+│   └── test_healthcheck.py
 ```
+
+The old host install's `systemd/birdhouse.service` was removed on 2026-11-22
+(Birdhouse#7): compose runs it.
 
 ---
 
@@ -130,7 +135,9 @@ nano .env   # fill in BIRDNET_DB_HOST_PATH and other values
 # Deploy (build image and start)
 make deploy
 
-# View logs
+# View logs: text on stdout, JSON lines in ~/birdhouse-logs/app.log, and
+# VictoriaLogs as source:birdhouse. Request lines carry the path only (never
+# the query string); /healthz and the page's assets only when they fail.
 make logs
 
 # Preview a branch at birdhouse-preview.sgc.rayandhon.com

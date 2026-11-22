@@ -12,6 +12,18 @@ services:
     env_file: .env
     networks: [traefik_default]
     restart: unless-stopped
+    # MEM-1: 27 MiB in use on 2026-11-22.
+    mem_limit: 256m
+    mem_reservation: 64m
+    # HEALTH-3: the fleet's probe of /healthz (src/birdhouse/healthcheck.py).
+    # Traefik routes only to a healthy container.
+    healthcheck:
+      test: ["CMD", "python3", "-I", "-S", "/app/src/birdhouse/healthcheck.py"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.rule=Host(`${SERVICE_HOST}`)"
@@ -19,9 +31,15 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=le"
       # Public, with no Authelia: the fleet's public middlewares (reverse-proxy
       # decisions/015, NET-4). public-guard caps requests in flight per Host
-      # against crawler swarms; public-compress gzips text. There is no
-      # /healthz yet (Birdhouse#7), so no health router outside the cap.
+      # against crawler swarms; public-compress gzips text.
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.middlewares=public-guard@file,public-compress@file"
+      # /healthz on a router of its own, outside the cap, so a monitor never
+      # gets a 429 (NET-4, HEALTH-4).
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-healthz.rule=Host(`${SERVICE_HOST}`) && Path(`/healthz`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-healthz.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-healthz.tls.certresolver=le"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-healthz.priority=100"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-healthz.service=${COMPOSE_PROJECT_NAME}"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=${PORT:-8090}"
       - "homepage.group=Birds"
       - "homepage.name=Birdhouse"
@@ -40,6 +58,8 @@ services:
       - ${BIRDNET_TAXONOMY_HOST_PATH:-/home/danhon/birdnet-go-app/config/models/shared/taxonomy.csv}:/data/taxonomy.csv:ro
       # Cached species photos (persist across rebuilds)
       - birdhouse-images:/app/data/image-cache
+      # LOG-1: JSON lines in app.log, read by VictoriaLogs.
+      - ${BIRDHOUSE_LOG_DIR:-/home/danhon/birdhouse-logs}:/logs
 
 networks:
   traefik_default:
