@@ -10,3 +10,8 @@ host: birdhouse.sgc.rayandhon.com
 internet: true
 issue: 7
 audience: users   # Dan, 2026-11-22 (reverse-proxy#144, decisions/047 §4)
+waivers:
+  - check: users-repo
+    until: 2026-12-15
+    issue: 9
+    why: "The users move (reverse-proxy decisions/047 §5) follows the gunicorn switch in #9, so compose.yml changes once; until then its deployment is still in the repo."
