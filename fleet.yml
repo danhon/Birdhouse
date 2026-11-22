@@ -1,14 +1,11 @@
 # fleet.yml: what Birdhouse says it is, for fleet-check (reverse-proxy
 # docs-site/docs/services/fleet-check.md). Its bootstrapped waivers
-# (reverse-proxy#15) were closed on 2026-11-22 (#7), but one. The site is
-# public, with no sign-in, behind public-guard: `internet: true` once Dan's
-# `fleet-ok: internet` is on #7, which ends the public-guard waiver. No
+# (reverse-proxy#15) were closed on 2026-11-22 (#7). The site is
+# public, with no sign-in, behind public-guard: `internet: true`, with Dan's
+# `fleet-ok: internet` on #7 (2026-11-22). No
 # units: systemd/birdhouse.service was the host install's, superseded by compose.
 service: birdhouse
 kind: web
 host: birdhouse.sgc.rayandhon.com
-internet: false
+internet: true
 issue: 7
-waivers:
-- {check: public-guard, until: 2026-12-15, issue: 7, why: router open without Authelia
-    or public-guard, bootstrap: true}
