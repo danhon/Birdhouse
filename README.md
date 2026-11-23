@@ -149,9 +149,12 @@ outside this repo.
 ## Development
 
 ```bash
-uv sync
-uv run pytest           # run tests
-uv run birdhouse        # run locally (reads from .env or env vars)
+uv sync --extra dev
+make test               # uv run --extra dev pytest -q
+# Run outside Docker: the settings come from the environment, and the two
+# BirdNET-Go paths are the files themselves, not the /data/ defaults.
+BIRDNET_DB_PATH=/path/to/birdnet.db BIRDNET_TAXONOMY_PATH=/path/to/taxonomy.csv \
+  uv run birdhouse      # gunicorn, on http://localhost:8090
 ```
 
 ---

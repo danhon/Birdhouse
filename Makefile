@@ -15,7 +15,7 @@ endif
 .PHONY: test run
 
 test:
-	uv run pytest -q
+	uv run --extra dev pytest -q
 
 # Run it yourself, in Docker: http://127.0.0.1:8090 (compose.override.yml).
 # Needs a .env (cp .env.example .env, then set the two BirdNET-Go paths). Its
