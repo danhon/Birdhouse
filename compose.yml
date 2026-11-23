@@ -12,7 +12,8 @@ services:
     env_file: .env
     networks: [traefik_default]
     restart: unless-stopped
-    # MEM-1: 27 MiB in use on 2026-11-22.
+    # MEM-1: 79 MiB in use on 2026-11-22 under gunicorn (master + one worker;
+    # 27 MiB under the development server before #9).
     mem_limit: 256m
     mem_reservation: 64m
     # HEALTH-3: the fleet's probe of /healthz (src/birdhouse/healthcheck.py).
