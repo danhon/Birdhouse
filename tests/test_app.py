@@ -255,3 +255,20 @@ def test_health_and_assets_are_logged_only_when_they_fail(client, caplog):
     client.get("/images/nope.jpg")
     lines = [r.getMessage() for r in caplog.records if r.name == "birdhouse.access"]
     assert len(lines) == 1 and lines[0].startswith("GET /images/nope.jpg 404 ")
+
+
+def test_serve_starts_the_poller_once_and_returns_the_app(monkeypatch, config):
+    started = []
+    monkeypatch.setattr(app_module.Config, "from_env", classmethod(lambda cls: config))
+    monkeypatch.setattr(app_module, "start_background_poller", lambda c: started.append(c))
+    app = app_module.serve()
+    assert started == [config]
+    assert app.config["BIRDHOUSE_CONFIG"] is config
+    assert config.image_cache_dir.is_dir()
+
+
+def test_main_becomes_gunicorn_never_the_development_server(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app_module.os, "execvp", lambda f, args: calls.append((f, args)))
+    app_module.main()
+    assert calls == [("gunicorn", ["gunicorn", "-c", "python:birdhouse.gunicorn_conf", "birdhouse.app:serve()"])]

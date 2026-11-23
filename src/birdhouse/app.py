@@ -696,17 +696,19 @@ def create_app(config: Optional[Config] = None) -> Flask:
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    # LOG-1: text on stdout, JSON lines in /logs/app.log when ~/birdhouse-logs
-    # is mounted there (compose.yml).
-    logs.setup(os.environ.get("BUILD_SHA", "dev")[:7],
-               "/logs/app.log" if Path("/logs").is_dir() else None)
-
+def serve() -> Flask:
+    """The app gunicorn serves (gunicorn_conf.py): the config, the image
+    cache, and the poller, started here, once per worker; there is one."""
     config = Config.from_env()
     config.image_cache_dir.mkdir(parents=True, exist_ok=True)
     start_background_poller(config)
-    app = create_app(config)
-    app.run(host="0.0.0.0", port=config.port, debug=False)
+    return create_app(config)
+
+
+def main() -> None:
+    """`birdhouse`, the image's command: becomes gunicorn (PY-2), never
+    Flask's development server. Logging is set up by gunicorn_conf.py."""
+    os.execvp("gunicorn", ["gunicorn", "-c", "python:birdhouse.gunicorn_conf", "birdhouse.app:serve()"])
 
 
 if __name__ == "__main__":

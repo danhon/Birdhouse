@@ -9,6 +9,7 @@ dependencies = [
     "requests>=2.31",
     "python-dateutil>=2.9",
     "anthropic>=0.68",
+    "gunicorn>=27.0.1",
 ]
 
 [project.optional-dependencies]
