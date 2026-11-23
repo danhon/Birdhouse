@@ -1,0 +1,31 @@
+# The test suite on every push and pull request, from a fresh clone, as
+# someone running Birdhouse themselves would get it. Before this nothing ran
+# it off the box, and `uv run pytest` failed on a fresh clone (pytest is in the
+# dev extra) without anyone noticing. No secrets. Docs-only commits skip it.
+name: tests
+
+on:
+  push:
+    paths-ignore: ["**.md"]
+  pull_request:
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"     # the image's Python
+      - run: uv sync --frozen --extra dev
+      - run: make test               # uv run --extra dev pytest -q
