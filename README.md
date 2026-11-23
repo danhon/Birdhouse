@@ -107,10 +107,10 @@ Copy `.env.example` to `.env` and fill in values. All variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `BIRDNET_BASE_URL` | `http://birdnet-go:8080` | BirdNET-Go API (for common name seeding), over `traefik_default`; host port 8888 is bound to 127.0.0.1 only (reverse-proxy#94) |
+| `BIRDNET_BASE_URL` | `http://birdnet-go:8080` | BirdNET-Go API (for common name seeding), as the container reaches it |
 | `BIRDNET_DB_HOST_PATH` | — | **Host** path to BirdNET-Go SQLite DB (Docker mount source) |
 | `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
-| `BIRDNET_TAXONOMY_HOST_PATH` | `~/birdnet-go-app/config/models/shared/taxonomy.csv` | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
+| `BIRDNET_TAXONOMY_HOST_PATH` | — | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
 | `BIRDNET_TAXONOMY_PATH` | `/data/taxonomy.csv` | Path inside the container (do not change) |
 | `PORT` | `8090` | Port the app listens on |
 | `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to display |
@@ -119,41 +119,32 @@ Copy `.env.example` to `.env` and fill in values. All variables:
 | `POLL_INTERVAL` | `60` | Seconds between DB refreshes |
 | `SLIDE_DURATION` | `8` | Seconds per carousel slide |
 | `ANTHROPIC_API_KEY` | — (optional) | Enables vision-based smart photo cropping; omit to fall back to a center crop |
-| `SERVICE_HOST` | `birdhouse.sgc.rayandhon.com` | Traefik routing hostname (set by Makefile) |
+| `BIRDHOUSE_LOG_DIR` | `./logs` | **Host** folder for `app.log` (JSON lines) |
 
 ---
 
-## Deployment
+## Running it yourself
 
-Birdhouse runs as a Docker Compose stack on ubuntuplex, discovered by Traefik via container labels.
+Birdhouse is MIT-licensed ([LICENSE](LICENSE)). It needs Docker and a
+[BirdNET-Go](https://github.com/tphakala/birdnet-go) whose files it can read.
 
 ```bash
-# First time
+git clone https://github.com/danhon/Birdhouse.git && cd Birdhouse
 cp .env.example .env
-nano .env   # fill in BIRDNET_DB_HOST_PATH and other values
-
-# Deploy (build image and start)
-make deploy
-
-# View logs: text on stdout, JSON lines in ~/birdhouse-logs/app.log, and
-# VictoriaLogs as source:birdhouse. Request lines carry the path only (never
-# the query string); /healthz and the page's assets only when they fail.
-make logs
-
-# Preview a branch at birdhouse-preview.sgc.rayandhon.com
-make preview
+$EDITOR .env          # the two BirdNET-Go paths, and BIRDNET_BASE_URL
+make run              # docker compose up --build, on http://127.0.0.1:8090
 ```
 
-See [python-apps.md](../reverse-proxy/docs-site/docs/services/python-apps.md) for the full pattern.
+`compose.yml` is the service: the image, `.env`, BirdNET-Go's database and
+taxonomy (read-only), the photo cache volume, and a log folder (`./logs` by
+default; `BIRDHOUSE_LOG_DIR` moves it). `compose.override.yml` publishes the
+port on 127.0.0.1 only, and docker compose reads it only when `COMPOSE_FILE`
+isn't set. It needs no login: everything it shows is public anyway.
+
+The author's own deployment (its proxy, network, limits and backups) lives
+outside this repo.
 
 ---
-
-### Backups
-
-The `birdhouse-images` volume (the image cache, with any hand-edited
-`.focus` files) is copied off-box nightly by the fleet's restic job, since
-2026-11-18 (reverse-proxy#82). The database is BirdNET-Go's, backed up with
-BirdNET-Go.
 
 ## Development
 

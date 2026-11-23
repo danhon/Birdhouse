@@ -61,7 +61,7 @@ class Config:
     def from_env(cls) -> "Config":
         return cls(
             birdnet_base_url=os.environ.get("BIRDNET_BASE_URL", "http://birdnet-go:8080").rstrip("/"),
-            birdnet_db_path=Path(os.environ.get("BIRDNET_DB_PATH", "/home/danhon/birdnet-go-app/data/birdnet.db")),
+            birdnet_db_path=Path(os.environ.get("BIRDNET_DB_PATH", "/data/birdnet.db")),
             port=int(os.environ.get("PORT", "8090")),
             image_cache_dir=Path(os.environ.get("IMAGE_CACHE_DIR", "data/image-cache")),
             min_confidence=float(os.environ.get("MIN_CONFIDENCE", "0.6")),
@@ -74,7 +74,7 @@ class Config:
             # BirdNET-Go's taxonomy.csv, used to keep only birds (class aves).
             taxonomy_path=Path(os.environ.get(
                 "BIRDNET_TAXONOMY_PATH",
-                "/home/danhon/birdnet-go-app/config/models/shared/taxonomy.csv",
+                "/data/taxonomy.csv",
             )),
         )
 

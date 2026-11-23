@@ -5,8 +5,13 @@ data/image-cache/
 data/*.sqlite
 config.env
 *.env
-!config.example.env
 .DS_Store
 .superpowers/
 ._*
 .clearance-rendered-preview-*/
+
+# Run it yourself (make run)
+logs/
+
+# The deployment's notes for Claude, linked in from outside the repo.
+CLAUDE.local.md
