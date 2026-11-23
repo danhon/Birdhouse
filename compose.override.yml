@@ -5,3 +5,7 @@ services:
   app:
     ports:
       - "127.0.0.1:8090:8090"
+    # So BIRDNET_BASE_URL=http://host.docker.internal:8080 reaches a
+    # BirdNET-Go on this host on Linux too (Docker Desktop has it built in).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

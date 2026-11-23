@@ -35,7 +35,7 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
 
 1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
 2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending. BirdNET-Go runs several models at once (BirdNET v2.4, BirdNET v3.0, Perch v2) and keeps a separate label per model, so rows are grouped by `scientific_name`, not `label_id`. The count sums every model's detections; BirdNET-Go doesn't log one call twice across models, so that is effectively a count of distinct events.
-3. Drops anything that isn't a bird: only names whose `class_name` is `aves` in BirdNET-Go's `taxonomy.csv` (loaded once at startup) are kept. BirdNET v2.4's sound classes are stored as Aves in the DB, so the label metadata can't be used for this. If the taxonomy file is missing, a hard-coded denylist of those sound classes is used instead, and non-bird animals get through.
+3. Drops anything that isn't a bird: only names whose `class_name` is `aves` in BirdNET-Go's `taxonomy.csv` (loaded once at startup) are kept. BirdNET v2.4's sound classes are stored as Aves in the DB, so the label metadata can't be used for this. Outside Docker, if the taxonomy file is missing, a hard-coded denylist of those sound classes is used instead, and non-bird animals get through; under compose the file is required (`BIRDNET_TAXONOMY_HOST_PATH`).
 4. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id, focus)`.
 5. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
 6. When `ANTHROPIC_API_KEY` is set, `fetch_species_image()` also computes a crop focal point via a one-time Claude vision call (see "Smart photo cropping" below), cached to disk like everything else.
@@ -112,7 +112,7 @@ Copy `.env.example` to `.env` and fill in values. All variables:
 | `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
 | `BIRDNET_TAXONOMY_HOST_PATH` | — | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
 | `BIRDNET_TAXONOMY_PATH` | `/data/taxonomy.csv` | Path inside the container (do not change) |
-| `PORT` | `8090` | Port the app listens on |
+| `PORT` | `8090` | Port gunicorn binds, outside Docker. Leave it at 8090 under compose: the published port, the healthcheck and a proxy assume it |
 | `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to display |
 | `IMAGE_CACHE_DIR` | `/app/data/image-cache` | Species photo cache (backed by Docker volume) |
 | `TZ` | `America/Los_Angeles` | Timezone for "today" |
