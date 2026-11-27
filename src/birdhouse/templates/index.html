@@ -1067,13 +1067,16 @@
           else closeOverlay(undefined, true);
           return;
         }
-        // Left/right step through the birds, unless an overlay is up (where
-        // the arrows belong to the panel, or to nothing at all).
+        // Left/right step through the birds. With a history open they take
+        // the bird and its history together; the species list keeps its own
+        // arrow-key scrolling.
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-        if (overlayOpen || historyOpen) return;
+        if (overlayOpen) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         e.preventDefault();
-        showSlide(current + (e.key === 'ArrowRight' ? 1 : -1));
+        const step = e.key === 'ArrowRight' ? 1 : -1;
+        if (historyOpen) stepHistory(step);
+        else showSlide(current + step);
       });
 
       ['touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
@@ -1338,27 +1341,17 @@
         historyTimer = setTimeout(function () { closeHistory(); }, OVERLAY_IDLE_MS);
       }
 
-      function openHistory(button, e) {
-        if (overlayOpen || historyOpen) return;
-        historyOpen   = true;
-        historyOrigin = button;
-        button.setAttribute('aria-expanded', 'true');
-        document.body.classList.add('history-open');
-        clearTimeout(historyHide);
-        historyCommon.textContent     = button.dataset.historyName || button.dataset.historySci;
-        historyScientific.textContent = button.dataset.historySci;
+      function loadHistory(sci, name) {
+        historyCommon.textContent     = name || sci;
+        historyScientific.textContent = sci;
         historyWindow.textContent     = 'Last 30 days';
         historyChart.textContent      = '';
         historyStats.textContent      = '';
         historyCaption.textContent    = 'Reading the last 30 days…';
         lastHistoryData = null;
-        historyOverlay.hidden = false;
-        requestAnimationFrame(function () { historyOverlay.classList.add('overlay--open'); });
-        if (fromKeyboard(e)) historyClose.focus({ preventScroll: true });
-        resetHistoryIdle();
 
         const token = ++historyToken;
-        fetch('/history.json?scientific_name=' + encodeURIComponent(button.dataset.historySci))
+        fetch('/history.json?scientific_name=' + encodeURIComponent(sci))
           .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function (data) {
             if (!historyOpen || token !== historyToken) return;
@@ -1369,6 +1362,32 @@
             if (!historyOpen || token !== historyToken) return;
             historyCaption.textContent = 'History unavailable.';
           });
+      }
+
+      function openHistory(button, e) {
+        if (overlayOpen || historyOpen) return;
+        historyOpen   = true;
+        historyOrigin = button;
+        button.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('history-open');
+        clearTimeout(historyHide);
+        historyOverlay.hidden = false;
+        requestAnimationFrame(function () { historyOverlay.classList.add('overlay--open'); });
+        if (fromKeyboard(e)) historyClose.focus({ preventScroll: true });
+        resetHistoryIdle();
+        loadHistory(button.dataset.historySci, button.dataset.historyName);
+      }
+
+      // A step keeps the placard open and swaps the bird behind it too
+      function stepHistory(direction) {
+        showSlide(current + direction);
+        const button = slides[current].querySelector('.slide__common');
+        if (!button) return;
+        if (historyOrigin) historyOrigin.setAttribute('aria-expanded', 'false');
+        historyOrigin = button;
+        button.setAttribute('aria-expanded', 'true');
+        loadHistory(button.dataset.historySci, button.dataset.historyName);
+        resetHistoryIdle();
       }
 
       function closeHistory(e) {

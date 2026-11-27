@@ -85,6 +85,9 @@ Python, because SQLite's `localtime` follows the process timezone, not
   on the chosen reading; an explicit `?history=` still wins, otherwise
   the last choice is kept in local storage.
 - The veil is the species list's `rgba(0,0,0,0.72)` with a 14px blur.
+- ← and → step to the previous/next bird while the history is open,
+  swapping the photograph behind the veil and the history in the placard
+  together. (The species list keeps the arrows for its own scrolling.)
 - Closing: ✕, Escape, a tap outside the placard, or 45 s without
   interaction. The carousel resumes with a fresh full slide duration.
 - A pending `/data.json` reload waits for the overlay to close.
