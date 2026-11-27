@@ -18,7 +18,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, time as clock_time, timedelta
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -35,6 +35,9 @@ access_log = logging.getLogger("birdhouse.access")
 # Requests logged only when they fail: the health probe, and the page's own
 # assets, which every open carousel fetches again and again.
 QUIET_PATHS = ("/healthz", "/static/", "/images/", "/favicon.ico", "/apple-touch-icon")
+
+# Which history chart `?history=` asks for; the first is the default.
+HISTORY_STYLES = ("strip", "field", "hours")
 
 INATURALIST_API = "https://api.inaturalist.org/v1/taxa"
 _SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_-]")
@@ -94,6 +97,15 @@ class Species:
     inat_id: Optional[int] = None      # iNaturalist taxon ID for direct taxon page link
     focus_x: float = 0.5   # normalized crop anchor (object-position) — center by default
     focus_y: float = 0.5
+
+
+@dataclass
+class HistoryDay:
+    date: date            # the local calendar day
+    count: int = 0        # detections that day, across every model
+    first: str = ""       # "6:05 am" local time, empty when undetected
+    last: str = ""
+    hours: list[int] = field(default_factory=lambda: [0] * 24)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +172,73 @@ def query_today_from_db(
     except Exception as exc:
         log.error("DB query failed: %s", exc)
         return []
+
+
+def query_history_from_db(
+    db_path: Path,
+    scientific_name: str,
+    tz: ZoneInfo,
+    min_confidence: float = 0.0,
+    days: int = 30,
+) -> list[HistoryDay]:
+    """
+    Return one HistoryDay per day for the last `days` days, ending today,
+    oldest first, for one species. Every day is present, including quiet ones.
+
+    Grouping happens in Python (not SQLite's localtime) so the day boundaries
+    follow the configured timezone rather than the process's. The rows are only
+    timestamps for one species, so this stays small even for a busy bird.
+    """
+    today = datetime.now(tz).date()
+    start = today - timedelta(days=days - 1)
+    start_ts = int(datetime.combine(start, clock_time.min, tzinfo=tz).timestamp())
+    end_ts = int(datetime.combine(today, clock_time.max, tzinfo=tz).timestamp())
+
+    try:
+        conn = _db_connect(db_path)
+        rows = conn.execute(
+            """
+            SELECT d.detected_at
+            FROM detections d
+            JOIN labels l ON l.id = d.label_id
+            WHERE l.scientific_name = ?
+              AND d.detected_at BETWEEN ? AND ?
+              AND d.confidence >= ?
+            """,
+            (scientific_name, start_ts, end_ts, min_confidence),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        log.error("History query failed for %s: %s", scientific_name, exc)
+        return []
+
+    buckets = {
+        start + timedelta(days=i): {"count": 0, "first": None, "last": None,
+                                    "hours": [0] * 24}
+        for i in range(days)
+    }
+    for (ts,) in rows:
+        dt = datetime.fromtimestamp(ts, tz)
+        bucket = buckets.get(dt.date())
+        if bucket is None:
+            continue
+        bucket["count"] += 1
+        bucket["hours"][dt.hour] += 1
+        if bucket["first"] is None or ts < bucket["first"]:
+            bucket["first"] = ts
+        if bucket["last"] is None or ts > bucket["last"]:
+            bucket["last"] = ts
+
+    return [
+        HistoryDay(
+            date=day,
+            count=b["count"],
+            first=_format_time(b["first"], tz) if b["first"] is not None else "",
+            last=_format_time(b["last"], tz) if b["last"] is not None else "",
+            hours=b["hours"],
+        )
+        for day, b in buckets.items()
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -657,6 +736,11 @@ def create_app(config: Optional[Config] = None) -> Flask:
     def index():
         species, date_label, last_updated = _store.snapshot()
         cfg = app.config["BIRDHOUSE_CONFIG"]
+        # The three history layouts are a temporary spike switch: `?history=`
+        # lets Dan compare them on the live site. Keep one and drop the rest.
+        history_style = request.args.get("history", "strip")
+        if history_style not in HISTORY_STYLES:
+            history_style = "strip"
         return render_template(
             "index.html",
             species=species,
@@ -664,7 +748,34 @@ def create_app(config: Optional[Config] = None) -> Flask:
             last_updated=last_updated,
             slide_duration=cfg.slide_duration,
             poll_interval=cfg.poll_interval,
+            history_style=history_style,
+            open_history=request.args.get("open", ""),
         )
+
+    @app.route("/history.json")
+    def history_json():
+        cfg = app.config["BIRDHOUSE_CONFIG"]
+        scientific_name = (request.args.get("scientific_name") or "").strip()
+        if not scientific_name:
+            return jsonify({"error": "scientific_name is required"}), 400
+        days = query_history_from_db(
+            cfg.birdnet_db_path, scientific_name, cfg.timezone, cfg.min_confidence
+        )
+        if not days:
+            return jsonify({"error": "history unavailable"}), 503
+        return jsonify({
+            "scientific_name": scientific_name,
+            "common_name": _name_cache.get(scientific_name),
+            "start": days[0].date.isoformat(),
+            "end": days[-1].date.isoformat(),
+            "days": [
+                {"date": d.date.isoformat(), "count": d.count,
+                 "first": d.first, "last": d.last, "hours": d.hours}
+                for d in days
+            ],
+            "present_days": sum(1 for d in days if d.count),
+            "total": sum(d.count for d in days),
+        })
 
     @app.route("/data.json")
     def data_json():

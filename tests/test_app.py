@@ -272,3 +272,88 @@ def test_main_becomes_gunicorn_never_the_development_server(monkeypatch):
     monkeypatch.setattr(app_module.os, "execvp", lambda f, args: calls.append((f, args)))
     app_module.main()
     assert calls == [("gunicorn", ["gunicorn", "-c", "python:birdhouse.gunicorn_conf", "birdhouse.app:serve()"])]
+
+
+# ---------------------------------------------------------------------------
+# Species history overlay and /history.json
+# ---------------------------------------------------------------------------
+
+def _history_html(data: bytes) -> str:
+    """Return just the history overlay's markup."""
+    html = data.decode()
+    start = html.index('id="history-overlay"')
+    end = html.index("<!-- /history-overlay -->", start)
+    return html[start:end]
+
+
+def _make_db(path, detections):
+    """A minimal BirdNET-Go DB: labels plus (label_id, ts, confidence) rows."""
+    import sqlite3
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE labels (id INTEGER PRIMARY KEY, scientific_name TEXT, model_id INTEGER);
+        CREATE TABLE detections (id INTEGER PRIMARY KEY, label_id INTEGER, detected_at INTEGER, confidence REAL);
+        INSERT INTO labels VALUES (1, 'Corvus brachyrhynchos', 1);
+        INSERT INTO labels VALUES (2, 'Corvus brachyrhynchos', 2);
+        INSERT INTO labels VALUES (3, 'Haemorhous mexicanus', 1);
+    """)
+    conn.executemany(
+        "INSERT INTO detections (label_id, detected_at, confidence) VALUES (?, ?, ?)",
+        detections,
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestSpeciesHistoryOverlay:
+    def test_common_name_is_a_history_button(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        data = client.get("/").data.decode()
+        assert re.search(r'<button[^>]*class="slide__common', data)
+        assert 'data-history-sci="Corvus brachyrhynchos"' in data
+        assert 'data-history-name="American Crow"' in data
+
+    def test_overlay_is_present_and_closed_by_default(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        data = client.get("/").data.decode()
+        assert re.search(r'id="history-overlay"[^>]*\bhidden\b', data)
+
+    def test_default_style_is_strip(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        assert 'id="history-chart" data-style="strip"' in _history_html(client.get("/").data)
+
+    def test_style_comes_from_the_query(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        for style in ("field", "hours"):
+            overlay = _history_html(client.get(f"/?history={style}").data)
+            assert f'data-style="{style}"' in overlay
+
+    def test_unknown_style_falls_back_to_strip(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        overlay = _history_html(client.get("/?history=nonsense").data)
+        assert 'data-style="strip"' in overlay
+
+    def test_no_overlay_in_empty_state(self, client):
+        assert b"history-overlay" not in client.get("/").data
+
+
+class TestHistoryJsonRoute:
+    def test_requires_a_scientific_name(self, client):
+        assert client.get("/history.json").status_code == 400
+
+    def test_returns_thirty_days_and_totals(self, client, config):
+        from datetime import datetime
+        now = datetime.now(config.timezone)
+        ts = int(now.replace(hour=8, minute=5, second=0, microsecond=0).timestamp())
+        _make_db(config.birdnet_db_path, [(1, ts, 0.9), (2, ts + 60, 0.9), (3, ts, 0.9)])
+        data = client.get("/history.json?scientific_name=Corvus%20brachyrhynchos").get_json()
+        assert data["scientific_name"] == "Corvus brachyrhynchos"
+        assert len(data["days"]) == 30
+        assert data["days"][-1]["count"] == 2
+        assert data["days"][-1]["hours"][8] == 2
+        assert data["present_days"] == 1
+        assert data["total"] == 2
+        assert data["start"] and data["end"]
+
+    def test_unavailable_history_is_503(self, client):
+        assert client.get("/history.json?scientific_name=Corvus%20brachyrhynchos").status_code == 503
