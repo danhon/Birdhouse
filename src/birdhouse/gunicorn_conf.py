@@ -12,7 +12,6 @@
   LOG-1 formats that logs.setup() installs. That runs here, in the master,
   before the worker forks, so both processes log the same way.
 """
-import logging
 import os
 from pathlib import Path
 

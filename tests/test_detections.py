@@ -1,6 +1,5 @@
 """Tests for _format_time and the CommonNameCache."""
 
-import pytest
 from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock
 

@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from birdhouse.app import query_today_from_db, _day_bounds
+from birdhouse.app import query_today_from_db
 
 TZ = ZoneInfo("America/Los_Angeles")
 

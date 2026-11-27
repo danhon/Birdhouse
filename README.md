@@ -152,7 +152,9 @@ outside this repo.
 
 ```bash
 uv sync --extra dev
-make test               # uv run --extra dev pytest -q
+make lint               # ruff's pyflakes rules: no unused imports or names
+make check-template     # node --check on the rendered page's inline JS
+make test               # all three; CI runs this
 # Run outside Docker: the settings come from the environment, and the two
 # BirdNET-Go paths are the files themselves, not the /data/ defaults.
 BIRDNET_DB_PATH=/path/to/birdnet.db BIRDNET_TAXONOMY_PATH=/path/to/taxonomy.csv \

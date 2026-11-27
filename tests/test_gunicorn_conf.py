@@ -2,7 +2,6 @@
 gunicorn's error log through the root logger's LOG-1 formats."""
 import importlib
 import logging
-from types import SimpleNamespace
 
 import pytest
 

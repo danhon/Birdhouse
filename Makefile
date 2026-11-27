@@ -12,9 +12,19 @@ deploy install-units: fleet-missing
 .DEFAULT_GOAL := $(_FLEET_SAVED_GOAL)
 endif
 
-.PHONY: test run
+.PHONY: test lint check-template run
 
-test:
+# Pyflakes rules only (unused imports and variables, undefined names): the
+# mistakes a refactor leaves behind, with no style opinions to churn on.
+lint:
+	uv run --extra dev ruff check --select F src tests scripts
+
+# The carousel, overlays and history charts are inline JS in index.html,
+# which pytest never parses. Render the page and let node --check it.
+check-template:
+	uv run --extra dev python scripts/check_template_js.py
+
+test: lint check-template
 	uv run --extra dev pytest -q
 
 # Run it yourself, in Docker: http://127.0.0.1:8090 (compose.override.yml).

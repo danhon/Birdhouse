@@ -27,7 +27,6 @@ import anthropic
 import requests
 from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
-from birdhouse import logs
 
 log = logging.getLogger(__name__)
 access_log = logging.getLogger("birdhouse.access")

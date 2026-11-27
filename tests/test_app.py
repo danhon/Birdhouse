@@ -4,9 +4,8 @@ import re
 
 import pytest
 from zoneinfo import ZoneInfo
-from pathlib import Path
 
-from birdhouse.app import Config, DataStore, Species, create_app
+from birdhouse.app import Config, Species, create_app
 import birdhouse.app as app_module
 
 
