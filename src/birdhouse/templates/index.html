@@ -522,6 +522,23 @@
       padding-bottom: 1.5rem;
     }
 
+    /* With a bird's history open, the slide's own caption is redundant and
+       its ghost competes with the chart: leave only the photograph behind. */
+    .header,
+    .slide__info,
+    .attribution,
+    .progress {
+      transition: opacity 0.35s ease-in-out;
+    }
+
+    body.history-open .header,
+    body.history-open .slide__info,
+    body.history-open .attribution,
+    body.history-open .progress {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .history__head {
       text-align: center;
       margin: 1.5rem 0 2.5rem;
@@ -563,19 +580,60 @@
       color: rgba(255, 255, 255, 0.45);
     }
 
-    /* History layout: bars, one per day */
+    /* History layout: bars, one per day, with a count axis */
+
+    .history__chart-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      column-gap: 0.9rem;
+      row-gap: 0.7rem;
+    }
+
+    .history__yaxis {
+      position: relative;
+      min-width: 3.4rem;
+      height: clamp(140px, 25vh, 220px);
+    }
+
+    .history__yaxis span {
+      position: absolute;
+      right: 0;
+      transform: translateY(50%);
+      font-size: clamp(0.55rem, 0.9vw, 0.66rem);
+      line-height: 1;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.42);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .history__plot {
+      position: relative;
+      height: clamp(140px, 25vh, 220px);
+    }
+
+    .history__gridline {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .history__gridline--base {
+      background: rgba(255, 255, 255, 0.22);
+    }
 
     .history__strip {
+      position: absolute;
+      inset: 0;
       display: grid;
       grid-template-columns: repeat(30, 1fr);
       align-items: end;
       gap: clamp(2px, 0.45vw, 5px);
-      height: clamp(130px, 24vh, 210px);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.22);
     }
 
     .history__bar {
-      min-height: 1px;
+      min-height: 2px;
       background: rgba(255, 255, 255, 0.78);
     }
 
@@ -591,7 +649,6 @@
     .history__axis {
       display: grid;
       grid-template-columns: repeat(30, 1fr);
-      margin-top: 0.7rem;
       font-size: clamp(0.55rem, 0.9vw, 0.68rem);
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -630,6 +687,9 @@
 
     .history__cell {
       aspect-ratio: 1.3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 2px;
       background: rgba(255, 255, 255, 0.04);
       border: 1px solid rgba(255, 255, 255, 0.06);
@@ -639,6 +699,19 @@
       border-color: rgba(255, 255, 255, 0.16);
     }
 
+    .history__cell-count {
+      font-size: clamp(0.55rem, 0.85vw, 0.68rem);
+      line-height: 1;
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.85);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* On a bright square the number prints as ink on paper */
+    .history__cell--bright .history__cell-count {
+      color: rgba(17, 17, 17, 0.62);
+    }
+
     .history__cell--outside {
       background: transparent;
       border-color: transparent;
@@ -646,49 +719,6 @@
 
     .history__cell--today {
       box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
-    }
-
-    /* History layout: day by hour */
-
-    .history__matrix {
-      display: grid;
-      grid-template-columns: 3.6rem 1fr;
-      grid-auto-rows: min-content;
-      align-items: center;
-      gap: clamp(2px, 0.4vw, 4px) 0.8rem;
-      max-width: 720px;
-      margin: 0 auto;
-    }
-
-    .history__matrix-row {
-      display: grid;
-      grid-template-columns: repeat(24, 1fr);
-      gap: 2px;
-    }
-
-    .history__hour {
-      height: clamp(5px, 1vh, 9px);
-      border-radius: 1px;
-      background: rgba(255, 255, 255, 0.035);
-    }
-
-    .history__matrix-label {
-      text-align: right;
-      font-size: clamp(0.55rem, 0.9vw, 0.68rem);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.38);
-      white-space: nowrap;
-    }
-
-    .history__hours {
-      display: flex;
-      justify-content: space-between;
-      font-size: clamp(0.55rem, 0.9vw, 0.68rem);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.4);
-      white-space: nowrap;
     }
 
     @media (max-width: 600px) {
@@ -705,9 +735,12 @@
         gap: 4px;
       }
 
-      .history__matrix {
-        grid-template-columns: 2.4rem 1fr;
-        gap: 3px 0.5rem;
+      .history__yaxis {
+        min-width: 2.6rem;
+      }
+
+      .history__yaxis span {
+        font-size: 0.55rem;
       }
     }
 
@@ -1087,32 +1120,65 @@
                shortDate(b) + ' ' + b.slice(0, 4);
       }
 
+      // A round step so the y-axis reads 0, 200, 400, 600 rather than
+      // 0, 187, 374, 561. Small maxima count in whole detections.
+      function niceStep(raw) {
+        const mag  = Math.pow(10, Math.floor(Math.log10(raw)));
+        const norm = raw / mag;
+        const candidates = mag < 10 ? [1, 2, 5, 10] : [1, 2, 2.5, 5, 10];
+        const nice = candidates.filter(function (c) { return c >= norm; })[0] || 10;
+        return nice * mag;
+      }
+
       // Layout one: a bar per day
       function renderStrip(days) {
         const max   = Math.max.apply(null, days.map(function (d) { return d.count; }));
+        const step  = max > 3 ? niceStep(max / 3) : 1;
+        const top   = max > 3 ? step * Math.ceil(max / step) : Math.max(1, max);
         const today = days[days.length - 1].date;
+
+        const grid  = element('div', 'history__chart-grid');
+        const yaxis = element('div', 'history__yaxis');
+        const plot  = element('div', 'history__plot');
         const strip = element('div', 'history__strip');
+
+        for (let tick = 0; tick <= top; tick += step) {
+          const at = tick / top * 100;
+          const label = element('span', '', tick.toLocaleString());
+          label.style.bottom = at + '%';
+          yaxis.appendChild(label);
+          const line = element('div', 'history__gridline' +
+            (tick === 0 ? ' history__gridline--base' : ''));
+          line.style.bottom = at + '%';
+          plot.appendChild(line);
+        }
+
         days.forEach(function (d) {
           const bar = element('div', 'history__bar');
           if (!d.count) {
             bar.classList.add('history__bar--empty');
           } else {
-            bar.style.height = Math.max(4, Math.round(Math.sqrt(d.count / max) * 100)) + '%';
+            bar.style.height = (d.count / top * 100) + '%';
             if (d.date === today) bar.classList.add('history__bar--today');
           }
           bar.title = longDate(d.date) + ' · ' + countLabel(d.count);
           strip.appendChild(bar);
         });
-        historyChart.appendChild(strip);
+        plot.appendChild(strip);
 
         const axis = element('div', 'history__axis');
         days.forEach(function (d, i) {
-          const label = element('span', '',
+          axis.appendChild(element('span', '',
             i === 0 || i === 7 || i === 14 || i === 21 || i === days.length - 1
-              ? (i === days.length - 1 ? 'today' : shortDate(d.date)) : '');
-          axis.appendChild(label);
+              ? (i === days.length - 1 ? 'today' : shortDate(d.date)) : ''));
         });
-        historyChart.appendChild(axis);
+        axis.style.gridColumn = '2';
+        axis.style.gridRow = '2';
+
+        grid.appendChild(yaxis);
+        grid.appendChild(plot);
+        grid.appendChild(axis);
+        historyChart.appendChild(grid);
       }
 
       // Layout two: a calendar of days
@@ -1141,8 +1207,12 @@
             } else {
               cell.title = longDate(key) + ' · ' + countLabel(rec.count);
               if (rec.count) {
+                const level = levelOf(rec.count, max);
                 cell.classList.add('history__cell--present');
-                cell.style.background = 'rgba(255,255,255,' + LEVELS[levelOf(rec.count, max)] + ')';
+                cell.style.background = 'rgba(255,255,255,' + LEVELS[level] + ')';
+                if (level >= 3) cell.classList.add('history__cell--bright');
+                cell.appendChild(element('span', 'history__cell-count',
+                  rec.count.toLocaleString()));
               }
               if (key === today) cell.classList.add('history__cell--today');
             }
@@ -1150,36 +1220,6 @@
           }
         }
         historyChart.appendChild(field);
-      }
-
-      // Layout three: day by hour
-      function renderHours(days) {
-        let max = 0;
-        days.forEach(function (d) {
-          d.hours.forEach(function (n) { if (n > max) max = n; });
-        });
-        const matrix = element('div', 'history__matrix');
-        days.forEach(function (d, i) {
-          const isToday = i === days.length - 1;
-          const show    = i === 0 || isToday || i % 5 === 0;
-          matrix.appendChild(element('div', 'history__matrix-label',
-            show ? (isToday ? 'today' : shortDate(d.date)) : ''));
-          const row = element('div', 'history__matrix-row');
-          d.hours.forEach(function (n) {
-            const cell = element('div', 'history__hour');
-            if (n) cell.style.background = 'rgba(255,255,255,' + LEVELS[levelOf(n, max)] + ')';
-            row.appendChild(cell);
-          });
-          row.title = longDate(d.date);
-          matrix.appendChild(row);
-        });
-        matrix.appendChild(element('div', 'history__matrix-label'));
-        const axis = element('div', 'history__hours');
-        ['midnight', '6 am', 'noon', '6 pm', 'midnight'].forEach(function (t) {
-          axis.appendChild(element('span', '', t));
-        });
-        matrix.appendChild(axis);
-        historyChart.appendChild(matrix);
       }
 
       function renderHistory(data) {
@@ -1190,16 +1230,14 @@
         historyChart.textContent      = '';
         const style = historyChart.dataset.style;
         if (style === 'field') renderField(days);
-        else if (style === 'hours') renderHours(days);
         else renderStrip(days);
         historyStats.textContent = data.total
           ? data.present_days + ' of ' + days.length + ' days · ' +
             data.total.toLocaleString() + ' detections'
           : 'Not detected in the last 30 days.';
         historyCaption.textContent =
-          style === 'field' ? 'Each square is a day; brighter squares had more detections.'
-          : style === 'hours' ? 'Each row is a day, oldest at the top; each column is an hour of that day.'
-          : 'Each bar is a day; taller bars mean more detections.';
+          style === 'field' ? 'Each square is a day; the number is that day\'s detections.'
+          : 'Each bar is a day; its height is that day\'s detections.';
       }
 
       function resetHistoryIdle() {
@@ -1212,6 +1250,7 @@
         historyOpen   = true;
         historyOrigin = button;
         button.setAttribute('aria-expanded', 'true');
+        document.body.classList.add('history-open');
         clearTimeout(historyHide);
         historyCommon.textContent     = button.dataset.historyName || button.dataset.historySci;
         historyScientific.textContent = button.dataset.historySci;
@@ -1241,6 +1280,7 @@
         if (!historyOpen) return;
         historyOpen = false;
         historyToken++;          // drop any response still in flight
+        document.body.classList.remove('history-open');
         if (historyOrigin) historyOrigin.setAttribute('aria-expanded', 'false');
         clearTimeout(historyTimer);
         historyOverlay.classList.remove('overlay--open');

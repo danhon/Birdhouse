@@ -322,16 +322,16 @@ class TestSpeciesHistoryOverlay:
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
         assert 'id="history-chart" data-style="strip"' in _history_html(client.get("/").data)
 
-    def test_style_comes_from_the_query(self, client):
+    def test_field_style_comes_from_the_query(self, client):
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
-        for style in ("field", "hours"):
-            overlay = _history_html(client.get(f"/?history={style}").data)
-            assert f'data-style="{style}"' in overlay
+        overlay = _history_html(client.get("/?history=field").data)
+        assert 'data-style="field"' in overlay
 
     def test_unknown_style_falls_back_to_strip(self, client):
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
-        overlay = _history_html(client.get("/?history=nonsense").data)
-        assert 'data-style="strip"' in overlay
+        for style in ("hours", "nonsense"):
+            overlay = _history_html(client.get(f"/?history={style}").data)
+            assert 'data-style="strip"' in overlay
 
     def test_no_overlay_in_empty_state(self, client):
         assert b"history-overlay" not in client.get("/").data
@@ -350,7 +350,7 @@ class TestHistoryJsonRoute:
         assert data["scientific_name"] == "Corvus brachyrhynchos"
         assert len(data["days"]) == 30
         assert data["days"][-1]["count"] == 2
-        assert data["days"][-1]["hours"][8] == 2
+        assert "hours" not in data["days"][-1]
         assert data["present_days"] == 1
         assert data["total"] == 2
         assert data["start"] and data["end"]

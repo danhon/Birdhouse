@@ -186,15 +186,14 @@ class TestQueryHistoryFromDb:
         assert days[-1].date == dt.now(TZ).date()
         assert days[0].date < days[-1].date
 
-    def test_counts_detections_per_local_day_and_hour(self, db_path):
+    def test_counts_detections_per_local_day(self, db_path):
         from birdhouse.app import query_history_from_db
         _insert_detection(db_path, 1, _ts(0, 8, 5))
         _insert_detection(db_path, 1, _ts(0, 8, 45))
         _insert_detection(db_path, 1, _ts(1, 23, 30))
         days = query_history_from_db(db_path, "Corvus brachyrhynchos", TZ)
-        today, yesterday = days[-1], days[-2]
-        assert (today.count, today.hours[8]) == (2, 2)
-        assert (yesterday.count, yesterday.hours[23]) == (1, 1)
+        assert days[-1].count == 2
+        assert days[-2].count == 1
 
     def test_quiet_days_are_present_and_empty(self, db_path):
         from birdhouse.app import query_history_from_db
@@ -202,7 +201,6 @@ class TestQueryHistoryFromDb:
         days = query_history_from_db(db_path, "Corvus brachyrhynchos", TZ)
         assert days[-1].count == 0
         assert days[-1].first == "" and days[-1].last == ""
-        assert days[-1].hours == [0] * 24
 
     def test_first_and_last_are_local_times(self, db_path):
         from birdhouse.app import query_history_from_db

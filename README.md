@@ -43,7 +43,7 @@ BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
 8. `GET /` renders `index.html` with the current store snapshot.
 9. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
 10. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
-11. `GET /history.json?scientific_name=…` answers a species' last 30 days on demand: one entry per day (count, first/last local times, and a 24-hour histogram), with quiet days present as zeroes. It runs the same birds-only, confidence and multi-model rules as today's list.
+11. `GET /history.json?scientific_name=…` answers a species' last 30 days on demand: one entry per day (count and first/last local times), with quiet days present as zeroes. It runs the same birds-only, confidence and multi-model rules as today's list.
 
 **"Today"** = calendar date in the timezone set by `TZ` env var.
 
@@ -62,7 +62,7 @@ Full-bleed photo carousel. Each slide:
 - Top strip: date (left), species count (right, tappable)
 - Progress bar along the bottom edge
 - Tap "N species today" to open a scrollable list of today's species over the current photo (thumbnail, names, first seen, count). Tap a bird to jump to its slide; tap ✕ or outside the list, press Esc, or wait 45 s to close it. The slideshow pauses while the list is open.
-- Tap a species' common name on its slide to open its **last 30 days** over the current photo: a quiet bar per day (taller is more detections), with the days it was heard, total detections, and the date range. ✕, Esc, a tap outside, or 45 s idle closes it; the slideshow pauses while it's open.
+- Tap a species' common name on its slide to open its **last 30 days** over the current photo: a bar per day against a detection axis (the default), with the days it was heard, total detections, and the date range. `?history=field` swaps the bars for a month calendar whose squares carry each day's count. ✕, Esc, a tap outside, or 45 s idle closes it; the slideshow pauses while it's open.
 - Click or tap anywhere else to advance; swipe left/right on mobile
 
 ---

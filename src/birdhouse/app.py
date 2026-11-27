@@ -36,8 +36,8 @@ access_log = logging.getLogger("birdhouse.access")
 # assets, which every open carousel fetches again and again.
 QUIET_PATHS = ("/healthz", "/static/", "/images/", "/favicon.ico", "/apple-touch-icon")
 
-# Which history chart `?history=` asks for; the first is the default.
-HISTORY_STYLES = ("strip", "field", "hours")
+# Which history layout `?history=` asks for; the first is the default.
+HISTORY_STYLES = ("strip", "field")
 
 INATURALIST_API = "https://api.inaturalist.org/v1/taxa"
 _SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_-]")
@@ -105,7 +105,6 @@ class HistoryDay:
     count: int = 0        # detections that day, across every model
     first: str = ""       # "6:05 am" local time, empty when undetected
     last: str = ""
-    hours: list[int] = field(default_factory=lambda: [0] * 24)
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +212,7 @@ def query_history_from_db(
         return []
 
     buckets = {
-        start + timedelta(days=i): {"count": 0, "first": None, "last": None,
-                                    "hours": [0] * 24}
+        start + timedelta(days=i): {"count": 0, "first": None, "last": None}
         for i in range(days)
     }
     for (ts,) in rows:
@@ -223,7 +221,6 @@ def query_history_from_db(
         if bucket is None:
             continue
         bucket["count"] += 1
-        bucket["hours"][dt.hour] += 1
         if bucket["first"] is None or ts < bucket["first"]:
             bucket["first"] = ts
         if bucket["last"] is None or ts > bucket["last"]:
@@ -235,7 +232,6 @@ def query_history_from_db(
             count=b["count"],
             first=_format_time(b["first"], tz) if b["first"] is not None else "",
             last=_format_time(b["last"], tz) if b["last"] is not None else "",
-            hours=b["hours"],
         )
         for day, b in buckets.items()
     ]
@@ -736,8 +732,8 @@ def create_app(config: Optional[Config] = None) -> Flask:
     def index():
         species, date_label, last_updated = _store.snapshot()
         cfg = app.config["BIRDHOUSE_CONFIG"]
-        # The three history layouts are a temporary spike switch: `?history=`
-        # lets Dan compare them on the live site. Keep one and drop the rest.
+        # Two readings of the same month: the default bar chart, or the
+        # `?history=field` calendar.
         history_style = request.args.get("history", "strip")
         if history_style not in HISTORY_STYLES:
             history_style = "strip"
@@ -770,7 +766,7 @@ def create_app(config: Optional[Config] = None) -> Flask:
             "end": days[-1].date.isoformat(),
             "days": [
                 {"date": d.date.isoformat(), "count": d.count,
-                 "first": d.first, "last": d.last, "hours": d.hours}
+                 "first": d.first, "last": d.last}
                 for d in days
             ],
             "present_days": sum(1 for d in days if d.count),
