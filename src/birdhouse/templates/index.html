@@ -1062,9 +1062,18 @@
       });
 
       document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Escape') return;
-        if (historyOpen) closeHistory(e);
-        else closeOverlay(undefined, true);
+        if (e.key === 'Escape') {
+          if (historyOpen) closeHistory(e);
+          else closeOverlay(undefined, true);
+          return;
+        }
+        // Left/right step through the birds, unless an overlay is up (where
+        // the arrows belong to the panel, or to nothing at all).
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        if (overlayOpen || historyOpen) return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        e.preventDefault();
+        showSlide(current + (e.key === 'ArrowRight' ? 1 : -1));
       });
 
       ['touchstart', 'pointerdown', 'keydown'].forEach(function (type) {
