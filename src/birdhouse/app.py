@@ -733,10 +733,10 @@ def create_app(config: Optional[Config] = None) -> Flask:
         species, date_label, last_updated = _store.snapshot()
         cfg = app.config["BIRDHOUSE_CONFIG"]
         # Two readings of the same month: the default bar chart, or the
-        # `?history=field` calendar.
-        history_style = request.args.get("history", "strip")
-        if history_style not in HISTORY_STYLES:
-            history_style = "strip"
+        # `?history=field` calendar. Without an explicit choice the page
+        # remembers the last one picked in the overlay's switch.
+        requested_style = request.args.get("history")
+        history_style = requested_style if requested_style in HISTORY_STYLES else "strip"
         return render_template(
             "index.html",
             species=species,
@@ -745,6 +745,7 @@ def create_app(config: Optional[Config] = None) -> Flask:
             slide_duration=cfg.slide_duration,
             poll_interval=cfg.poll_interval,
             history_style=history_style,
+            history_explicit=requested_style in HISTORY_STYLES,
             open_history=request.args.get("open", ""),
         )
 

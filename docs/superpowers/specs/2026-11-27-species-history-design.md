@@ -33,7 +33,8 @@ over the photograph, not a dashboard.
   dropped: too dense for the wall).
 - No per-day drill-down, filters or links out.
 - No change to the carousel or today's list.
-- No remembered layout between visits: the layout is per page load.
+- No remembered layout *per species*: one choice applies to every
+  history on the display.
 
 ## Chosen layouts
 
@@ -78,6 +79,11 @@ Python, because SQLite's `localtime` follows the process timezone, not
 - Opening: the name is a threadbare button (no chrome); the tap never
   advances the carousel. `?open=<scientific name>` opens a species'
   history on load, for a shareable or reviewable URL.
+- A **Bars · Calendar** switch at the foot of the placard flips the
+  reading in place, without refetching. The active word is underlined and
+  the address bar is updated, so a reload or a data-change reload stays
+  on the chosen reading; an explicit `?history=` still wins, otherwise
+  the last choice is kept in local storage.
 - The veil is the species list's `rgba(0,0,0,0.72)` with a 14px blur.
 - Closing: ✕, Escape, a tap outside the placard, or 45 s without
   interaction. The carousel resumes with a fresh full slide duration.

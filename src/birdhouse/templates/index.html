@@ -580,6 +580,43 @@
       color: rgba(255, 255, 255, 0.45);
     }
 
+    /* The two readings, switched in place under the chart */
+    .history__switch {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      gap: 0.7rem;
+      margin-top: 1.4rem;
+    }
+
+    .history__switch-option {
+      font: inherit;
+      font-size: clamp(0.6rem, 0.95vw, 0.7rem);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.4);
+      background: none;
+      border: 0;
+      /* Finger-sized target without moving the words */
+      padding: 10px 4px;
+      margin: -10px -4px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .history__switch-option--on {
+      color: rgba(255, 255, 255, 0.85);
+      text-decoration: underline;
+      text-decoration-color: rgba(255, 255, 255, 0.35);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 4px;
+    }
+
+    .history__switch-sep {
+      font-size: clamp(0.6rem, 0.95vw, 0.7rem);
+      color: rgba(255, 255, 255, 0.25);
+    }
+
     /* History layout: bars, one per day, with a count axis */
 
     .history__chart-grid {
@@ -691,8 +728,8 @@
       align-items: center;
       justify-content: center;
       border-radius: 2px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.09);
     }
 
     .history__cell--present {
@@ -874,6 +911,13 @@
         <div class="history__chart" id="history-chart" data-style="{{ history_style }}"></div>
         <p class="history__stats" id="history-stats"></p>
         <p class="history__caption" id="history-caption"></p>
+        <div class="history__switch" role="group" aria-label="History layout">
+          <button class="history__switch-option" type="button"
+                  data-history-style="strip" aria-pressed="false">Bars</button>
+          <span class="history__switch-sep" aria-hidden="true">·</span>
+          <button class="history__switch-option" type="button"
+                  data-history-style="field" aria-pressed="false">Calendar</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1063,10 +1107,49 @@
       const historyCaption     = document.getElementById('history-caption');
       const historyClose       = historyOverlay.querySelector('.overlay__close');
       const nameButtons        = Array.from(document.querySelectorAll('.slide__common'));
+      const switchButtons      = Array.from(historyOverlay.querySelectorAll('.history__switch-option'));
+      const HISTORY_EXPLICIT   = {{ history_explicit | tojson }};
       let historyTimer   = null;
       let historyHide    = null;
       let historyToken   = 0;
       let historyOrigin  = null;
+      let lastHistoryData = null;
+
+      // The last layout picked here is remembered when the URL doesn't name
+      // one, so the page's own reload doesn't undo the viewer's choice.
+      if (!HISTORY_EXPLICIT) {
+        let stored = null;
+        try { stored = localStorage.getItem('birdhouse-history'); } catch (err) { /* private mode */ }
+        if (stored === 'strip' || stored === 'field') historyChart.dataset.style = stored;
+      }
+      syncHistorySwitch();
+
+      function syncHistorySwitch() {
+        switchButtons.forEach(function (button) {
+          const on = button.dataset.historyStyle === historyChart.dataset.style;
+          button.classList.toggle('history__switch-option--on', on);
+          button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      }
+
+      function chooseHistoryStyle(style) {
+        if (style === historyChart.dataset.style) return;
+        historyChart.dataset.style = style;
+        try { localStorage.setItem('birdhouse-history', style); } catch (err) { /* private mode */ }
+        // Keep the address bar honest, so a reload stays on this reading
+        const url = new URL(window.location.href);
+        url.searchParams.set('history', style);
+        window.history.replaceState(null, '', url);
+        syncHistorySwitch();
+        if (lastHistoryData) renderHistory(lastHistoryData);
+      }
+
+      switchButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+          chooseHistoryStyle(button.dataset.historyStyle);
+          if (historyOpen) resetHistoryIdle();
+        });
+      });
 
       function parseISO(iso) {
         const p = iso.split('-');
@@ -1238,6 +1321,7 @@
         historyCaption.textContent =
           style === 'field' ? 'Each square is a day; the number is that day\'s detections.'
           : 'Each bar is a day; its height is that day\'s detections.';
+        syncHistorySwitch();
       }
 
       function resetHistoryIdle() {
@@ -1258,6 +1342,7 @@
         historyChart.textContent      = '';
         historyStats.textContent      = '';
         historyCaption.textContent    = 'Reading the last 30 days…';
+        lastHistoryData = null;
         historyOverlay.hidden = false;
         requestAnimationFrame(function () { historyOverlay.classList.add('overlay--open'); });
         if (fromKeyboard(e)) historyClose.focus({ preventScroll: true });
@@ -1268,6 +1353,7 @@
           .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
           .then(function (data) {
             if (!historyOpen || token !== historyToken) return;
+            lastHistoryData = data;
             renderHistory(data);
           })
           .catch(function () {

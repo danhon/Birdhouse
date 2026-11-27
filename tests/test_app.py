@@ -333,6 +333,14 @@ class TestSpeciesHistoryOverlay:
             overlay = _history_html(client.get(f"/?history={style}").data)
             assert 'data-style="strip"' in overlay
 
+    def test_switch_offers_both_layouts(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        overlay = _history_html(client.get("/").data)
+        assert 'role="group" aria-label="History layout"' in overlay
+        assert 'data-history-style="strip"' in overlay
+        assert 'data-history-style="field"' in overlay
+        assert 'aria-pressed="false"' in overlay
+
     def test_no_overlay_in_empty_state(self, client):
         assert b"history-overlay" not in client.get("/").data
 
