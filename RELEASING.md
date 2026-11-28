@@ -2,8 +2,9 @@
 
 There is no browser CI: the test suite guards the code, a `release` workflow
 builds and publishes the image from a tag, and a release is still gated by
-one fresh install that follows the stranger's path. Do the checklist below
-before a tag, and record the result.
+one fresh install that follows the stranger's path. Two lists follow: the
+**Checklist** is done *before* the tag, and **The image** has a *before* and
+an *after* part. Record the result below.
 
 ## Checklist
 
@@ -31,6 +32,16 @@ refuses a tag whose number doesn't match `project.version`, so bump
 `pyproject.toml` and `CHANGELOG.md` *before* tagging — character for
 character, so a pre-release is `0.2.0-rc1` in both, not `0.2.0rc1`.
 
+Before the tag:
+
+- [ ] On the first release only, delete the "No image is published yet"
+      paragraph from INSTALL.md's *Quick start*.
+- [ ] Build the image and run it through the install file the stranger gets:
+      `docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t ghcr.io/danhon/birdhouse:local .`,
+      then, in an empty folder with the real `.env`,
+      `BIRDHOUSE_IMAGE_TAG=local docker compose -f <checkout>/compose.image.yml up -d`.
+      The page serves, and `/healthz` reports that commit.
+
 After the tag:
 
 - [ ] The tag's `release` workflow is green, and the run lists the version
@@ -40,8 +51,11 @@ After the tag:
       <https://github.com/users/danhon/packages/container/birdhouse/settings>.
 - [ ] `docker pull ghcr.io/danhon/birdhouse:vX.Y.Z` works **without**
       credentials, from a shell with no `docker login`.
-- [ ] `/healthz` in that image reports the tagged commit
-      (`curl -s localhost:8090/healthz` → `"build":"<sha>"`).
+- [ ] In an empty folder, run INSTALL.md's *Quick start* as written with
+      `BIRDHOUSE_IMAGE_TAG=vX.Y.Z` in `.env`: it pulls, the three-point
+      check in *Run* passes, and `/healthz` reports the tagged commit
+      (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove that
+      check's project and volume afterwards.
 
 The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
 The reference deployment still builds from source with `make deploy`.

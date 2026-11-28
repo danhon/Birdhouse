@@ -22,34 +22,44 @@ Birdhouse is tested with **BirdNET-Go 20261031**. See
 
 ## Quick start (the published image)
 
-Birdhouse publishes an image for **linux/amd64**. Nothing is built: two
-files, one command. You still need the two BirdNET-Go files from
+Birdhouse's image is for **linux/amd64**. Nothing is built: two files, one
+command. You still need the two BirdNET-Go files from
 [Before you start](#before-you-start).
+
+**No image is published yet.** The image install begins with the next
+release, `v0.1.1`; until then, build from source with
+[Configure](#configure) and [Run](#run) below. If the pull says
+`manifest unknown` or `denied`, that release isn't out, or its package isn't
+public yet — use the source install.
+
+In `.env`, besides the two host paths:
+
+- If BirdNET-Go runs on this machine, set
+  `BIRDNET_BASE_URL=http://host.docker.internal:8080` — the compose file
+  provides that hostname. The default, `birdnet-go:8080`, doesn't resolve
+  there, and common names fall back to iNaturalist.
+- To pin a version, set `BIRDHOUSE_IMAGE_TAG=v0.1.1`. Put it in `.env`, not
+  only on the command line, so a later `pull` and `up` agree; without it you
+  get `ghcr.io/danhon/birdhouse:latest`.
 
 ```bash
 mkdir birdhouse && cd birdhouse
 curl -fsSLO https://raw.githubusercontent.com/danhon/Birdhouse/main/compose.image.yml
 curl -fsSL https://raw.githubusercontent.com/danhon/Birdhouse/main/.env.example -o .env
-$EDITOR .env            # the two BirdNET-Go host paths
+$EDITOR .env            # the two BirdNET-Go host paths, and the two lines above
 mkdir -p logs
 docker compose -f compose.image.yml up -d
 # then open http://127.0.0.1:8090
 ```
 
-The image is `ghcr.io/danhon/birdhouse:latest` by default. To pin a version,
-add `BIRDHOUSE_IMAGE_TAG=v0.1.1` to `.env` or before the command.
+Everything else applies to either install. **Configure**'s clone steps and
+`make run` in **Run** are the source install only; if you used the image,
+skip those, but read [Configuration](#configuration) for what the `.env`
+values mean, and run the three-point check under **Run** to see that it
+works. [When the page says it can't read BirdNET-Go](#when-the-page-says-it-cant-read-birdnet-go)
+covers a diagnostic page.
 
-If BirdNET-Go runs on this machine, also set
-`BIRDNET_BASE_URL=http://host.docker.internal:8080` in `.env` — the compose
-file provides that hostname — or common names fall back to iNaturalist.
-
-The configuration, the preflight and diagnostics, and the public-page
-warning below apply to either install. **Configure** and **Run** are the
-build-from-source path: they start with `git clone`. If you used the image,
-skip to
-[When the page says it can't read BirdNET-Go](#when-the-page-says-it-cant-read-birdnet-go).
-
-## Configure (building from source)
+## Configure
 
 ```bash
 git clone https://github.com/danhon/Birdhouse.git
@@ -70,7 +80,7 @@ BIRDNET_BASE_URL=http://birdnet-go:8080
 names. With `make run` and BirdNET-Go on the same host, use
 `http://host.docker.internal:8080`; the included override maps that on Linux.
 
-## Run (building from source)
+## Run
 
 ```bash
 make run
@@ -157,8 +167,9 @@ sake. Birdhouse only needs the mounted files.
 
 - **Image install:** `docker compose -f compose.image.yml pull`, then
   `up -d` again; change `BIRDHOUSE_IMAGE_TAG` to move to another version.
-  The photo cache volume persists, but it is named after the folder you run
-  in — moving from a `make run` install to the image re-fetches photos once.
+  The photo cache volume persists. It is named after the folder you run in,
+  so an image install and a source install in folders of the same name
+  (`birdhouse`) share it.
 - **Source install:** pull a new commit and run `make run` again; the image
   rebuilds and the photo volume persists.
 - The photo cache is the `birdhouse-images` Docker volume. It holds each
