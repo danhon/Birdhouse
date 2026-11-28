@@ -20,7 +20,36 @@ BirdNET-Go's REST API is not a substitute for the database.
 Birdhouse is tested with **BirdNET-Go 20261031**. See
 [Compatibility](#compatibility).
 
-## Configure
+## Quick start (the published image)
+
+Birdhouse publishes an image for **linux/amd64**. Nothing is built: two
+files, one command. You still need the two BirdNET-Go files from
+[Before you start](#before-you-start).
+
+```bash
+mkdir birdhouse && cd birdhouse
+curl -fsSLO https://raw.githubusercontent.com/danhon/Birdhouse/main/compose.image.yml
+curl -fsSL https://raw.githubusercontent.com/danhon/Birdhouse/main/.env.example -o .env
+$EDITOR .env            # the two BirdNET-Go host paths
+mkdir -p logs
+docker compose -f compose.image.yml up -d
+# then open http://127.0.0.1:8090
+```
+
+The image is `ghcr.io/danhon/birdhouse:latest` by default. To pin a version,
+add `BIRDHOUSE_IMAGE_TAG=v0.1.1` to `.env` or before the command.
+
+If BirdNET-Go runs on this machine, also set
+`BIRDNET_BASE_URL=http://host.docker.internal:8080` in `.env` — the compose
+file provides that hostname — or common names fall back to iNaturalist.
+
+The configuration, the preflight and diagnostics, and the public-page
+warning below apply to either install. **Configure** and **Run** are the
+build-from-source path: they start with `git clone`. If you used the image,
+skip to
+[When the page says it can't read BirdNET-Go](#when-the-page-says-it-cant-read-birdnet-go).
+
+## Configure (building from source)
 
 ```bash
 git clone https://github.com/danhon/Birdhouse.git
@@ -41,7 +70,7 @@ BIRDNET_BASE_URL=http://birdnet-go:8080
 names. With `make run` and BirdNET-Go on the same host, use
 `http://host.docker.internal:8080`; the included override maps that on Linux.
 
-## Run
+## Run (building from source)
 
 ```bash
 make run
@@ -96,6 +125,7 @@ instead of showing an empty page. There is no version matrix yet.
 | `POLL_INTERVAL` | `60` | Seconds between database refreshes |
 | `SLIDE_DURATION` | `8` | Seconds each slide is shown |
 | `ANTHROPIC_API_KEY` | — | Optional; enables the one-time smart photo crop |
+| `BIRDHOUSE_IMAGE_TAG` | `latest` | Image install only: the version to run |
 | `BIRDHOUSE_LOG_DIR` | `./logs` | **Host** folder for `app.log` (JSON lines) |
 
 ### Common names
@@ -125,8 +155,12 @@ sake. Birdhouse only needs the mounted files.
 
 ## Upgrades, the cache and backups
 
-- Pull a new commit and run `make run` again; the image rebuilds and the
-  photo volume persists.
+- **Image install:** `docker compose -f compose.image.yml pull`, then
+  `up -d` again; change `BIRDHOUSE_IMAGE_TAG` to move to another version.
+  The photo cache volume persists, but it is named after the folder you run
+  in — moving from a `make run` install to the image re-fetches photos once.
+- **Source install:** pull a new commit and run `make run` again; the image
+  rebuilds and the photo volume persists.
 - The photo cache is the `birdhouse-images` Docker volume. It holds each
   photo and its `.name`, `.id`, `.credit` and optional `.focus` sidecars.
   Back it up if you have hand-edited crop anchors; the rest can be fetched

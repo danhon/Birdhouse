@@ -34,6 +34,19 @@ Status: v0.1.0, MIT. One Birdhouse per BirdNET-Go installation; you run both.
 
 ## Quick start
 
+From the published image — no clone, no build (linux/amd64):
+
+```bash
+mkdir birdhouse && cd birdhouse
+curl -fsSLO https://raw.githubusercontent.com/danhon/Birdhouse/main/compose.image.yml
+curl -fsSL https://raw.githubusercontent.com/danhon/Birdhouse/main/.env.example -o .env
+$EDITOR .env          # the two BirdNET-Go host paths
+mkdir -p logs
+docker compose -f compose.image.yml up -d
+```
+
+Or from source:
+
 ```bash
 git clone https://github.com/danhon/Birdhouse.git
 cd Birdhouse

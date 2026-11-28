@@ -1,8 +1,9 @@
 # Releasing Birdhouse
 
-There is no browser or Docker CI: the test suite guards the code, and a
-release is gated by one fresh install that follows the stranger's path. Do
-this before a tag, and record the result below.
+There is no browser CI: the test suite guards the code, a `release` workflow
+builds and publishes the image from a tag, and a release is still gated by
+one fresh install that follows the stranger's path. Do the checklist below
+before a tag, and record the result.
 
 ## Checklist
 
@@ -21,6 +22,29 @@ this before a tag, and record the result below.
       missing file, confirm the page names it, then restore it (recreating the
       container if the mount changed) and confirm the carousel returns.
 - [ ] Stop and remove the check's compose project and photo volume.
+
+## The image
+
+A release tag publishes `ghcr.io/danhon/birdhouse:<version>` and `latest`
+for `linux/amd64`, built by `.github/workflows/release.yml`. The workflow
+refuses a tag whose number doesn't match `project.version`, so bump
+`pyproject.toml` and `CHANGELOG.md` *before* tagging — character for
+character, so a pre-release is `0.2.0-rc1` in both, not `0.2.0rc1`.
+
+After the tag:
+
+- [ ] The tag's `release` workflow is green, and the run lists the version
+      tag and (for a release) `latest`.
+- [ ] The package is public — a first release only. A GHCR package pushed by
+      `GITHUB_TOKEN` starts private; change its visibility at
+      <https://github.com/users/danhon/packages/container/birdhouse/settings>.
+- [ ] `docker pull ghcr.io/danhon/birdhouse:vX.Y.Z` works **without**
+      credentials, from a shell with no `docker login`.
+- [ ] `/healthz` in that image reports the tagged commit
+      (`curl -s localhost:8090/healthz` → `"build":"<sha>"`).
+
+The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
+The reference deployment still builds from source with `make deploy`.
 
 ## The v0.1.0 run — 2026-11-27
 
