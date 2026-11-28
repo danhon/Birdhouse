@@ -86,7 +86,7 @@ jobs:
           fi
           echo "$out" | grep -qiE 'not found|manifest unknown|name unknown' || { echo "$out" >&2; exit 1; }
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
