@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 # Astral stopped updating uv:python3.12-bookworm-slim on 2026-02-04, so a
 # rebuild never got Debian's fixes (reverse-proxy python-apps.md). uv pinned
 # by version, a release at least 3 days old (IMG-2).
