@@ -34,13 +34,16 @@ character, so a pre-release is `0.2.0-rc1` in both, not `0.2.0rc1`.
 
 Before the tag:
 
-- [ ] On the first release only, delete the "No image is published yet"
-      paragraph from INSTALL.md's *Quick start*.
 - [ ] Build the image and run it through the install file the stranger gets:
       `docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t ghcr.io/danhon/birdhouse:local .`,
-      then, in an empty folder with the real `.env`,
-      `BIRDHOUSE_IMAGE_TAG=local docker compose -f <checkout>/compose.image.yml up -d`.
-      The page serves, and `/healthz` reports that commit.
+      then, in an empty folder, do what the quick start does: copy
+      `compose.image.yml` and your real `.env` in, `mkdir -p logs`, and run
+      `BIRDHOUSE_IMAGE_TAG=local docker compose -f compose.image.yml up -d`
+      *there*. (Compose takes the folder of the `-f` file as the project
+      directory, so pointing `-f` at the checkout would read the checkout's
+      `.env`, `logs` and volume.) The page serves, and `/healthz` reports
+      that commit. Afterwards `docker compose -f compose.image.yml down -v`,
+      remove the folder, and `docker rmi ghcr.io/danhon/birdhouse:local`.
 
 After the tag:
 
@@ -56,6 +59,9 @@ After the tag:
       check in *Run* passes, and `/healthz` reports the tagged commit
       (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove that
       check's project and volume afterwards.
+- [ ] On the first release only, and only now that the pull above works
+      without credentials, delete the "No image is published yet" paragraph
+      from INSTALL.md's *Quick start*.
 
 The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
 The reference deployment still builds from source with `make deploy`.
