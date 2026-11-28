@@ -42,7 +42,7 @@ jobs:
       # v0.1.1 always; `latest` for a release only, never for a pre-release
       # tag such as v0.2.0-rc1 (the action's default flavour).
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/danhon/birdhouse
           tags: |
