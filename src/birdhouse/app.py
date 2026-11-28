@@ -96,6 +96,8 @@ class Species:
     inat_id: Optional[int] = None      # iNaturalist taxon ID for direct taxon page link
     focus_x: float = 0.5   # normalized crop anchor (object-position) — center by default
     focus_y: float = 0.5
+    credit: str = ""       # "Photo: Joe McKenna · CC BY-NC"; empty until backfilled
+    credit_url: str = ""
 
 
 @dataclass
@@ -128,6 +130,65 @@ def _db_connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+# The BirdNET-Go tables/columns Birdhouse reads. A wider schema is fine; a
+# missing one of these is what the preflight reports to the operator.
+REQUIRED_DB_COLUMNS = {
+    "labels": ("id", "scientific_name"),
+    "detections": ("label_id", "detected_at", "confidence"),
+}
+REQUIRED_TAXONOMY_COLUMNS = ("sci_name", "class_name")
+
+
+def check_birdnet_inputs(db_path: Path, taxonomy_path: Optional[Path]) -> str:
+    """
+    Return what is wrong with BirdNET-Go's files in words an operator can act
+    on, or "" when both look readable and shaped as Birdhouse expects.
+
+    Deliberately structural rather than version-pinned: it is the tables and
+    columns the queries use, plus the two taxonomy columns the bird filter
+    needs. The reference is BirdNET-Go 20261031 (INSTALL.md).
+    """
+    if not db_path.exists():
+        return (f"BirdNET-Go's database isn't at {db_path}. Check that "
+                "BIRDNET_DB_HOST_PATH points at birdnet.db and that it is mounted.")
+
+    try:
+        conn = _db_connect(db_path)
+        try:
+            for table, required in REQUIRED_DB_COLUMNS.items():
+                found = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if not found:
+                    return (f"BirdNET-Go's database has no {table} table. Birdhouse "
+                            f"expects the tables written by BirdNET-Go 20261031.")
+                missing = [column for column in required if column not in found]
+                if missing:
+                    return (f"BirdNET-Go's {table} table is missing "
+                            f"{', '.join(missing)}. Birdhouse expects the schema written "
+                            f"by BirdNET-Go 20261031.")
+        finally:
+            conn.close()
+    except Exception:
+        return (f"BirdNET-Go's database at {db_path} could not be read. Check that it is "
+                "the file BirdNET-Go writes and that it is mounted read-only.")
+
+    if taxonomy_path is None or not taxonomy_path.exists():
+        return (f"BirdNET-Go's taxonomy.csv isn't at {taxonomy_path}. Check that "
+                "BIRDNET_TAXONOMY_HOST_PATH points at taxonomy.csv and that it is mounted.")
+
+    try:
+        with open(taxonomy_path, newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, csv.Error):
+        return (f"BirdNET-Go's taxonomy.csv at {taxonomy_path} could not be read. "
+                "Check the mount and file permissions.")
+
+    missing = [column for column in REQUIRED_TAXONOMY_COLUMNS if column not in header]
+    if missing:
+        return (f"BirdNET-Go's taxonomy.csv is missing the {', '.join(missing)} "
+                f"column. Birdhouse needs both sci_name and class_name.")
+    return ""
 
 
 def query_today_from_db(
@@ -282,6 +343,78 @@ def _safe_filename(scientific_name: str) -> str:
     return _SAFE_NAME_RE.sub("_", scientific_name) + ".jpg"
 
 
+# ---------------------------------------------------------------------------
+# Photo credit
+#
+# iNaturalist's default_photo carries the photographer and licence in a
+# single attribution string. Keep it beside the photo (like .name/.id), so a
+# public page can carry the credit without asking the API again.
+# ---------------------------------------------------------------------------
+
+CREDIT_SUFFIX = ".credit"
+INATURALIST_PHOTO = "https://www.inaturalist.org/photos/{photo_id}"
+INATURALIST_TAXON = "https://www.inaturalist.org/taxa/{taxon_id}"
+INATURALIST_HOME = "https://www.inaturalist.org"
+
+
+def _credit_text(attribution: str, license_code: str) -> str:
+    """Turn iNaturalist's attribution into the placard's short credit."""
+    name = (attribution or "").strip()
+    if name.startswith("(c) "):
+        name = name[4:]
+    for marker in (", some rights reserved", ", all rights reserved"):
+        if marker in name:
+            name = name.split(marker)[0]
+    if name.lower() in ("no rights reserved", "cc0"):
+        name = ""
+
+    license_name = (license_code or "").upper()
+    if license_name.startswith("CC-"):
+        license_name = "CC " + license_name[3:]
+    if name and license_name:
+        return f"Photo: {name} · {license_name}"
+    if name:
+        return f"Photo: {name}"
+    if license_name:
+        return f"Photo · {license_name}"
+    return ""
+
+
+def _write_credit(cache_dir: Path, filename: str, photo: dict, taxon_id: Optional[int]) -> None:
+    photo_id = photo.get("id")
+    if photo_id:
+        url = INATURALIST_PHOTO.format(photo_id=photo_id)
+    elif taxon_id:
+        url = INATURALIST_TAXON.format(taxon_id=taxon_id)
+    else:
+        url = INATURALIST_HOME
+    data = {
+        "attribution": (photo.get("attribution") or "").strip(),
+        "license_code": (photo.get("license_code") or "").strip(),
+        "photo_id": photo_id,
+        "url": url,
+    }
+    try:
+        (cache_dir / (filename + CREDIT_SUFFIX)).write_text(
+            json.dumps(data), encoding="utf-8")
+    except OSError as exc:
+        log.warning("Could not cache the photo credit for %s: %s", filename, exc)
+
+
+def _read_credit(cache_dir: Path, filename: Optional[str]) -> tuple[str, str]:
+    """Return (credit text, link) for a cached photo, or ("", "") if unknown."""
+    if not filename:
+        return "", ""
+    try:
+        data = json.loads(
+            (cache_dir / (filename + CREDIT_SUFFIX)).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "", ""
+    text = _credit_text(data.get("attribution", ""), data.get("license_code", ""))
+    return (text or "Photo via iNaturalist",
+            data.get("url") or INATURALIST_HOME)
+
+
 def fetch_species_image(
     scientific_name: str,
     cache_dir: Path,
@@ -335,8 +468,9 @@ def _fetch_image_metadata(
     dest = cache_dir / filename
     name_file = cache_dir / (filename + ".name")
     id_file = cache_dir / (filename + ".id")
+    credit_file = cache_dir / (filename + CREDIT_SUFFIX)
 
-    if dest.exists() and name_file.exists() and id_file.exists():
+    if dest.exists() and name_file.exists() and id_file.exists() and credit_file.exists():
         # All three cached on disk — no API call needed.
         inat_id_str = id_file.read_text(encoding="utf-8").strip()
         inat_id = int(inat_id_str) if inat_id_str.isdigit() else None
@@ -371,11 +505,15 @@ def _fetch_image_metadata(
     if inat_id:
         id_file.write_text(str(inat_id), encoding="utf-8")
 
+    # Write the credit even when the image itself is already cached: this is
+    # the backfill for photo caches made before Birdhouse carried one.
+    photo = taxon.get("default_photo") or {}
+    _write_credit(cache_dir, filename, photo, inat_id)
+
     if dest.exists():
-        # Image already on disk — we only needed the common name / ID.
+        # Image already on disk — we only needed the common name / ID / credit.
         return filename, inat_common, inat_id
 
-    photo = taxon.get("default_photo") or {}
     image_url = photo.get("large_url") or photo.get("medium_url") or ""
 
     if not image_url:
@@ -602,6 +740,7 @@ class DataStore:
     species: list[Species] = field(default_factory=list)
     date_label: str = ""
     last_updated: str = ""
+    problem: str = ""          # set when BirdNET-Go's files can't be read
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def update(self, species: list[Species], date_label: str, last_updated: str) -> None:
@@ -609,10 +748,23 @@ class DataStore:
             self.species = species
             self.date_label = date_label
             self.last_updated = last_updated
+            self.problem = ""
+
+    def fail(self, problem: str, date_label: str, last_updated: str) -> None:
+        """Show the diagnostic page instead of an empty, misleading carousel."""
+        with self._lock:
+            self.species = []
+            self.date_label = date_label
+            self.last_updated = last_updated
+            self.problem = problem
 
     def snapshot(self) -> tuple[list[Species], str, str]:
         with self._lock:
             return list(self.species), self.date_label, self.last_updated
+
+    def current_problem(self) -> str:
+        with self._lock:
+            return self.problem
 
 
 _store = DataStore()
@@ -626,6 +778,21 @@ def _date_label(tz: ZoneInfo) -> str:
     return datetime.now(tz).strftime("%A %-d %B %Y")
 
 
+_input_problem: Optional[str] = None
+
+
+def _publish_problem(problem: str) -> None:
+    """Log a preflight failure once, and its recovery once, not every poll."""
+    global _input_problem
+    if problem == _input_problem:
+        return
+    if problem:
+        log.error("BirdNET-Go input check failed: %s", problem)
+    elif _input_problem:
+        log.info("BirdNET-Go input check recovered")
+    _input_problem = problem
+
+
 def _refresh(
     config: Config,
     http: requests.Session,
@@ -634,6 +801,13 @@ def _refresh(
 ) -> None:
     """Fetch today's data from the DB, images from iNaturalist, update store."""
     log.info("Refreshing from DB: %s", config.birdnet_db_path)
+
+    problem = check_birdnet_inputs(config.birdnet_db_path, config.taxonomy_path)
+    _publish_problem(problem)
+    if problem:
+        _store.fail(problem, _date_label(config.timezone),
+                    datetime.now(config.timezone).strftime("%-I:%M %p"))
+        return
 
     rows = query_today_from_db(config.birdnet_db_path, config.timezone, config.min_confidence)
     log.info("DB returned %d unique species", len(rows))
@@ -650,6 +824,7 @@ def _refresh(
         image_path, inat_common, inat_id, focus = fetch_species_image(
             sci, config.image_cache_dir, http, vision_client
         )
+        credit, credit_url = _read_credit(config.image_cache_dir, image_path)
         # Seed cache with iNaturalist common name when BirdNET-Go API didn't have it
         if inat_common and _name_cache.get(sci) == sci:
             _name_cache.set(sci, inat_common)
@@ -663,6 +838,8 @@ def _refresh(
             inat_id=inat_id,
             focus_x=focus[0] if focus else 0.5,
             focus_y=focus[1] if focus else 0.5,
+            credit=credit,
+            credit_url=credit_url,
         ))
 
     now = datetime.now(config.timezone).strftime("%-I:%M %p")
@@ -677,14 +854,19 @@ def start_background_poller(config: Config) -> None:
     # only constructed when a key is present, per config.vision_enabled.
     vision_client = anthropic.Anthropic() if config.vision_enabled else None
     # Loaded once: taxonomy.csv only changes when BirdNET-Go is upgraded.
-    bird_names = load_bird_names(config.taxonomy_path)
-    if bird_names is not None:
-        log.info("Loaded %d bird names from %s", len(bird_names), config.taxonomy_path)
+    state = {"names": load_bird_names(config.taxonomy_path)}
+    if state["names"] is not None:
+        log.info("Loaded %d bird names from %s", len(state["names"]), config.taxonomy_path)
 
     def loop() -> None:
         while True:
             try:
-                _refresh(config, http, vision_client, bird_names)
+                if state["names"] is None:
+                    state["names"] = load_bird_names(config.taxonomy_path)
+                    if state["names"] is not None:
+                        log.info("Loaded %d bird names from %s",
+                                 len(state["names"]), config.taxonomy_path)
+                _refresh(config, http, vision_client, state["names"])
             except Exception:
                 log.exception("Unhandled error in refresh loop")
             time.sleep(config.poll_interval)
@@ -746,6 +928,7 @@ def create_app(config: Optional[Config] = None) -> Flask:
             history_style=history_style,
             history_explicit=requested_style in HISTORY_STYLES,
             open_history=request.args.get("open", ""),
+            problem=_store.current_problem(),
         )
 
     @app.route("/history.json")
@@ -759,9 +942,13 @@ def create_app(config: Optional[Config] = None) -> Flask:
         )
         if not days:
             return jsonify({"error": "history unavailable"}), 503
+        credit, credit_url = _read_credit(
+            cfg.image_cache_dir, _safe_filename(scientific_name))
         return jsonify({
             "scientific_name": scientific_name,
             "common_name": _name_cache.get(scientific_name),
+            "credit": credit,
+            "credit_url": credit_url,
             "start": days[0].date.isoformat(),
             "end": days[-1].date.isoformat(),
             "days": [
@@ -780,6 +967,7 @@ def create_app(config: Optional[Config] = None) -> Flask:
             "date_label": date_label,
             "species_count": len(species),
             "last_updated": last_updated,
+            "problem": _store.current_problem(),
         })
 
     @app.route("/favicon.ico")

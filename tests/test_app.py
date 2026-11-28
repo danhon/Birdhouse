@@ -1,5 +1,6 @@
 """Tests for the Flask app routes."""
 
+import json
 import re
 
 import pytest
@@ -57,6 +58,24 @@ class TestIndexRoute:
 
     def test_empty_state_shows_no_birds_message(self, client):
         assert b"No birds yet today" in client.get("/").data
+
+    def test_a_problem_shows_the_diagnostic_not_an_empty_page(self, client):
+        app_module._store.fail(
+            "BirdNET-Go's database isn't at /data/birdnet.db.",
+            "Friday 27 November 2026", "8:05 am",
+        )
+        data = client.get("/").data
+        assert b"can't read BirdNET-Go" in data
+        assert b"/data/birdnet.db" in data
+        assert b"No birds yet today" not in data
+        assert b'id="carousel"' not in data
+
+    def test_recovery_clears_the_diagnostic(self, client):
+        app_module._store.fail("broken", "Friday 27 November 2026", "8:05 am")
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 1)])
+        data = client.get("/").data
+        assert b"can't read BirdNET-Go" not in data
+        assert b'id="carousel"' in data
 
     def test_species_name_rendered(self, client):
         _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 5)])
@@ -220,6 +239,13 @@ class TestDataJsonRoute:
         data = client.get("/data.json").get_json()
         assert "last_updated" in data
 
+    def test_problem_is_carried_for_a_page_that_is_waiting(self, client):
+        app_module._store.fail("BirdNET-Go's database isn't at /data/birdnet.db.",
+                               "Friday 27 November 2026", "8:05 am")
+        data = client.get("/data.json").get_json()
+        assert data["species_count"] == 0
+        assert "isn't at" in data["problem"]
+
 
 class TestIcons:
     @pytest.mark.parametrize("path", [
@@ -340,6 +366,19 @@ class TestSpeciesHistoryOverlay:
         assert 'data-history-style="field"' in overlay
         assert 'aria-pressed="false"' in overlay
 
+    def test_slide_carries_the_photo_credit(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3,
+                             credit="Photo: Joe McKenna · CC BY-NC",
+                             credit_url="https://www.inaturalist.org/photos/24115")])
+        html = client.get("/").data.decode()
+        assert 'class="attribution"' in html
+        assert "Photo: Joe McKenna · CC BY-NC" in html
+        assert 'href="https://www.inaturalist.org/photos/24115"' in html
+
+    def test_history_overlay_has_a_credit_line(self, client):
+        _load_store([Species("American Crow", "Corvus brachyrhynchos", "8:00 am", 3)])
+        assert 'id="history-credit"' in _history_html(client.get("/").data)
+
     def test_no_overlay_in_empty_state(self, client):
         assert b"history-overlay" not in client.get("/").data
 
@@ -361,6 +400,23 @@ class TestHistoryJsonRoute:
         assert data["present_days"] == 1
         assert data["total"] == 2
         assert data["start"] and data["end"]
+
+    def test_history_carries_the_photo_credit(self, client, config):
+        from datetime import datetime
+        now = datetime.now(config.timezone)
+        ts = int(now.replace(hour=8, minute=5, second=0, microsecond=0).timestamp())
+        _make_db(config.birdnet_db_path, [(1, ts, 0.9)])
+        config.image_cache_dir.mkdir(parents=True, exist_ok=True)
+        filename = app_module._safe_filename("Corvus brachyrhynchos")
+        (config.image_cache_dir / (filename + ".credit")).write_text(json.dumps({
+            "attribution": "(c) Joe McKenna, some rights reserved (CC BY-NC)",
+            "license_code": "cc-by-nc",
+            "photo_id": 24115,
+            "url": "https://www.inaturalist.org/photos/24115",
+        }), encoding="utf-8")
+        data = client.get("/history.json?scientific_name=Corvus%20brachyrhynchos").get_json()
+        assert data["credit"] == "Photo: Joe McKenna · CC BY-NC"
+        assert data["credit_url"] == "https://www.inaturalist.org/photos/24115"
 
     def test_unavailable_history_is_503(self, client):
         assert client.get("/history.json?scientific_name=Corvus%20brachyrhynchos").status_code == 503

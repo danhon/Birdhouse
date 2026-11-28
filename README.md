@@ -1,150 +1,116 @@
 # Birdhouse
 
-A full-bleed bird species carousel showing every unique species detected today by BirdNET-Go, in order of first detection. Designed to be readable at a distance — wall-mounted TV, monitor across a room, or a phone.
+A full-bleed carousel of every bird species BirdNET-Go has heard today, in
+order of first detection. Built for a wall-mounted screen, a monitor across
+the room, or a phone: one photograph, the names, and a month of history
+behind a tap.
 
-Live at: `https://birdhouse.sgc.rayandhon.com` (public, no authentication)
+Reference display: **[birdhouse.sgc.rayandhon.com](https://birdhouse.sgc.rayandhon.com)**
+(Dan's own installation — public, no authentication).
+
+Status: v0.1.0, MIT. One Birdhouse per BirdNET-Go installation; you run both.
 
 ---
 
 ## What it does
 
-- Queries the BirdNET-Go SQLite database directly every 60 seconds
-- Shows each unique bird species once, ordered by first detection time today — merged across all of BirdNET-Go's models, with non-birds (mammals, frogs, BirdNET's `Engine`/`Dog`/... sound classes) hidden
-- Displays a full-bleed species photo (from iNaturalist, cached to disk), common name, scientific name, first-seen time, last-seen time, and detection count
-- Optionally uses Claude vision to crop each photo around the bird itself rather than the frame center (requires `ANTHROPIC_API_KEY`; falls back to a center crop without it)
-- Automatically reloads when a new species appears or the date rolls over
-- Responsive layout for both large displays and mobile portrait
+- Reads BirdNET-Go's SQLite database, not a camera stream, and shows each
+  species once per day, merged across every BirdNET-Go model and filtered to
+  birds.
+- A full-bleed iNaturalist photograph, with its per-photo credit, plus the
+  common and scientific names, first and last heard times, and detection
+  count.
+- A **last 30 days** history for any bird, opened by tapping its name: a bar
+  per day against a detection axis, or a month calendar with each day's
+  count. A Bars · Calendar switch flips between them.
+- Tapping the day's species count opens today's list; ← / → step through the
+  birds on a keyboard. The slideshow pauses while a panel is open and always
+  finds its way back.
+- Optionally crops each photo around the bird itself with Claude vision
+  (needs an Anthropic key; a centre crop otherwise).
+- Reloads itself when a new species appears or the date rolls over.
 
 ---
 
-## Architecture
+## Quick start
+
+```bash
+git clone https://github.com/danhon/Birdhouse.git
+cd Birdhouse
+cp .env.example .env
+$EDITOR .env          # the two BirdNET-Go host paths
+make run              # docker compose, http://127.0.0.1:8090
+```
+
+You need Docker and a BirdNET-Go whose database and `taxonomy.csv` Birdhouse
+can read. **[INSTALL.md](INSTALL.md)** covers the paths, the preflight
+diagnostics, upgrades and the public-page warning. If the page says it can't
+read BirdNET-Go, start there.
+
+---
+
+## How it works
 
 ```
 BirdNET-Go SQLite DB ──poll every 60s──► Birdhouse (Flask)
                                               │
-                       iNaturalist API ───────┤ (once per species, cached to disk)
-                    (photo, common name, ID)  │
+                     iNaturalist API ─────────┤ (photo, name, credit; cached)
+                        Claude API ───────────┤ (optional crop, once per species)
                                               │
-                          Claude API ─────────┤ (once per species, cached to disk;
-                      (crop focal point)      │  optional — skipped without a key)
-                                              │
-                                    Browser ◄─┘ (server-rendered HTML + JS polling)
+                                    Browser ◄─┘ (server-rendered page)
 ```
 
-### Data flow
+Birdhouse mounts BirdNET-Go's database and `taxonomy.csv` read-only. It polls
+the database every `POLL_INTERVAL` seconds, groups detections by scientific
+name across all models, keeps only names whose taxonomy class is `aves`, and
+renders a server-side page. Photos and their credits are fetched from
+iNaturalist once and cached beside the image.
 
-1. Background thread calls `query_today_from_db()` every `POLL_INTERVAL` seconds.
-2. Queries `detections` JOIN `labels` for today's calendar day (local timezone), filtered to `confidence >= MIN_CONFIDENCE`. Returns `(scientific_name, first_seen_ts, last_seen_ts, count)` per species, sorted by `first_seen` ascending. BirdNET-Go runs several models at once (BirdNET v2.4, BirdNET v3.0, Perch v2) and keeps a separate label per model, so rows are grouped by `scientific_name`, not `label_id`. The count sums every model's detections; BirdNET-Go doesn't log one call twice across models, so that is effectively a count of distinct events.
-3. Drops anything that isn't a bird: only names whose `class_name` is `aves` in BirdNET-Go's `taxonomy.csv` (loaded once at startup) are kept. BirdNET v2.4's sound classes are stored as Aves in the DB, so the label metadata can't be used for this. Outside Docker, if the taxonomy file is missing, a hard-coded denylist of those sound classes is used instead, and non-bird animals get through; under compose the file is required (`BIRDNET_TAXONOMY_HOST_PATH`).
-4. For each species, `fetch_species_image()` checks the disk cache, then calls the iNaturalist taxa API if not cached. Returns `(image_filename, common_name, inat_taxon_id, focus)`.
-5. Common names come from the BirdNET-Go REST API (seeded on first unknown species); iNaturalist `preferred_common_name` is used as fallback.
-6. When `ANTHROPIC_API_KEY` is set, `fetch_species_image()` also computes a crop focal point via a one-time Claude vision call (see "Smart photo cropping" below), cached to disk like everything else.
-7. `DataStore` (thread-safe) holds the current species list, date label, and last-updated time.
-8. `GET /` renders `index.html` with the current store snapshot.
-9. `GET /data.json` returns `{date_label, species_count, last_updated}` for client-side polling.
-10. Client JS polls `/data.json` every `POLL_INTERVAL` seconds and calls `location.reload()` if species count or date label changes.
-11. `GET /history.json?scientific_name=…` answers a species' last 30 days on demand: one entry per day (count and first/last local times), with quiet days present as zeroes. It runs the same birds-only, confidence and multi-model rules as today's list.
+The REST API is used only to seed common names; if it is unavailable (or
+BirdNET-Go's app login is on), iNaturalist names take over.
 
-**"Today"** = calendar date in the timezone set by `TZ` env var.
-
-**Freshness:** the DB is opened with `immutable=1` and only `birdnet.db` is mounted (not its `-wal` file), so detections show up once BirdNET-Go checkpoints the WAL — usually a few minutes behind. That's accepted for a slideshow. Because the mount is a single file, restoring BirdNET-Go's DB from a backup (a new file) needs a Birdhouse restart.
+Reads are `immutable=1` against a single mounted file, so new detections
+appear once BirdNET-Go checkpoints its WAL — usually a few minutes behind.
 
 ---
 
-## Page layout
+## Using it
 
-Full-bleed photo carousel. Each slide:
-
-- Photo fills the entire viewport (`object-fit: cover`)
-- Bottom gradient overlay for text legibility
-- Bottom-left: common name (large serif), scientific name (italic, links directly to the iNaturalist taxon page), detection count + last seen time
-- Bottom-right: first-seen time, slide counter ("3 of 12")
-- Top strip: date (left), species count (right, tappable)
-- Progress bar along the bottom edge
-- Tap "N species today" to open a scrollable list of today's species over the current photo (thumbnail, names, first seen, count). Tap a bird to jump to its slide; tap ✕ or outside the list, press Esc, or wait 45 s to close it. The slideshow pauses while the list is open.
-- Tap a species' common name on its slide to open its **last 30 days** over the current photo: a bar per day against a detection axis (the default), with the days it was heard, total detections, and the date range. `?history=field` swaps the bars for a month calendar whose squares carry each day's count. A **Bars · Calendar** switch at the foot of the panel flips between them in place; the last choice is remembered. ✕, Esc, a tap outside, or 45 s idle closes it; the slideshow pauses while it's open.
-- Click or tap anywhere else to advance; swipe left/right on mobile; ← / → on a keyboard. With a history open, the arrows take the bird and its history together; the species list keeps their own scrolling.
+- Click or tap anywhere on a slide to advance; swipe left/right on touch;
+  ← / → on a keyboard.
+- Tap **N species today** for the day's list. Tap a bird to jump to it.
+- Tap a species' **common name** for its last 30 days. With the history open,
+  ← / → take the bird and its history together.
+- Everything that opens closes on ✕, Escape, a tap outside, or 45 seconds
+  without interaction.
 
 ---
 
-## Repository layout
+## Photos and credit
 
-```
-Birdhouse/
-├── README.md
-├── pyproject.toml
-├── uv.lock
-├── Dockerfile
-├── compose.yml
-├── Makefile
-├── .env.example             ← all config vars documented; commit this
-├── .gitignore               ← .env, data/, image-cache/ gitignored
-├── src/
-│   └── birdhouse/
-│       ├── app.py           ← Flask app, DB query, birds-only filter, image cache, polling, /healthz
-│       ├── logs.py          ← the fleet log format: text on stdout, JSON in ~/birdhouse-logs/app.log
-│       ├── healthcheck.py   ← compose's health probe of /healthz
-│       ├── static/          ← favicon.ico, apple-touch-icon.png
-│       └── templates/
-│           └── index.html   ← carousel template
-├── tests/
-│   ├── test_db.py
-│   ├── test_taxonomy.py
-│   ├── test_app.py
-│   ├── test_detections.py
-│   ├── test_image_cache.py
-│   ├── test_focus_point.py
-│   ├── test_logs.py
-│   └── test_healthcheck.py
-```
+Photos come from the [iNaturalist](https://www.inaturalist.org) taxa API and
+are cached to a Docker volume. Each cached photo keeps its photographer and
+licence in a `.credit` sidecar; the page shows that credit and links to the
+photo. Photos cached before credits existed are backfilled on the next poll.
+The volume is the only state Birdhouse owns (besides the log), and it is
+worth backing up if you have hand-edited crop anchors.
 
-The old host install's `systemd/birdhouse.service` was removed on 2026-11-22
-(Birdhouse#7): compose runs it.
+Smart cropping is one Claude vision call per species, cached forever. It is
+off unless `ANTHROPIC_API_KEY` is set; without it photos use a centre crop.
 
 ---
 
-## Configuration
+## Documentation
 
-Copy `.env.example` to `.env` and fill in values. All variables:
-
-| Variable | Default | Description |
-|---|---|---|
-| `BIRDNET_BASE_URL` | `http://birdnet-go:8080` | BirdNET-Go API (for common name seeding), as the container reaches it |
-| `BIRDNET_DB_HOST_PATH` | — | **Host** path to BirdNET-Go SQLite DB (Docker mount source) |
-| `BIRDNET_DB_PATH` | `/data/birdnet.db` | Path inside the container (do not change) |
-| `BIRDNET_TAXONOMY_HOST_PATH` | — | **Host** path to BirdNET-Go's `taxonomy.csv` (Docker mount source) |
-| `BIRDNET_TAXONOMY_PATH` | `/data/taxonomy.csv` | Path inside the container (do not change) |
-| `PORT` | `8090` | Port gunicorn binds, outside Docker. Leave it at 8090 under compose: the published port, the healthcheck and a proxy assume it |
-| `MIN_CONFIDENCE` | `0.6` | Minimum detection confidence to display |
-| `IMAGE_CACHE_DIR` | `/app/data/image-cache` | Species photo cache (backed by Docker volume) |
-| `TZ` | `America/Los_Angeles` | Timezone for "today" |
-| `POLL_INTERVAL` | `60` | Seconds between DB refreshes |
-| `SLIDE_DURATION` | `8` | Seconds per carousel slide |
-| `ANTHROPIC_API_KEY` | — (optional) | Enables vision-based smart photo cropping; omit to fall back to a center crop |
-| `BIRDHOUSE_LOG_DIR` | `./logs` | **Host** folder for `app.log` (JSON lines) |
-
----
-
-## Running it yourself
-
-Birdhouse is MIT-licensed ([LICENSE](LICENSE)). It needs Docker and a
-[BirdNET-Go](https://github.com/tphakala/birdnet-go) whose files it can read.
-
-```bash
-git clone https://github.com/danhon/Birdhouse.git && cd Birdhouse
-cp .env.example .env
-$EDITOR .env          # the two BirdNET-Go paths, and BIRDNET_BASE_URL
-make run              # docker compose up --build, on http://127.0.0.1:8090
-```
-
-`compose.yml` is the service: the image, `.env`, BirdNET-Go's database and
-taxonomy (read-only), the photo cache volume, and a log folder (`./logs` by
-default; `BIRDHOUSE_LOG_DIR` moves it). `compose.override.yml` publishes the
-port on 127.0.0.1 only, and docker compose reads it only when `COMPOSE_FILE`
-isn't set. It needs no login: everything it shows is public anyway.
-
-The author's own deployment (its proxy, network, limits and backups) lives
-outside this repo.
+| | |
+|---|---|
+| [INSTALL.md](INSTALL.md) | paths, first run, diagnostics, configuration, upgrades |
+| [GLOSSARY.md](GLOSSARY.md) | operator, viewer, history, layout — the words this project uses |
+| [SECURITY.md](SECURITY.md) | reporting a vulnerability; no auth by design |
+| [RELEASING.md](RELEASING.md) | the checklist a release runs |
+| [CHANGELOG.md](CHANGELOG.md) | what changed |
+| [docs/adr/](docs/adr/) | why Birdhouse reads SQLite rather than BirdNET-Go's API |
+| [docs/superpowers/](docs/superpowers/) | the history feature's design record |
 
 ---
 
@@ -161,31 +127,5 @@ BIRDNET_DB_PATH=/path/to/birdnet.db BIRDNET_TAXONOMY_PATH=/path/to/taxonomy.csv 
   uv run birdhouse      # gunicorn, on http://localhost:8090
 ```
 
----
-
-## Image and common name sources
-
-**Photos:** iNaturalist taxa API — `results[0].default_photo.large_url`. Cached to `IMAGE_CACHE_DIR/{sanitised_scientific_name}.jpg`. Falls back to a dark background if unavailable.
-
-**Common names:** BirdNET-Go REST API (`/api/v2/detections?limit=200`), seeded on first encounter. iNaturalist `preferred_common_name` used as fallback when BirdNET-Go doesn't have a name (e.g. rarer species not in the last 200 detections). Falls back to scientific name if neither source has it.
-
-**iNaturalist taxon ID:** Stored alongside the photo and common name so links go directly to `inaturalist.org/taxa/{id}` rather than a search page.
-
-**Smart photo cropping:** When `ANTHROPIC_API_KEY` is set, each species' photo gets a one-time Claude vision call (`claude-opus-4-8`, structured output) that locates the bird's head/eye and returns a normalized crop anchor. The carousel's `object-fit: cover` stays full-bleed on every viewport; only the crop anchor (`object-position`) moves, so mobile portrait crops stay centered on the bird instead of the geometric center of the photo. Computed once per species, cached forever — never recomputed on later polls. Without a key, photos fall back to a plain center crop, same as before.
-
-### Disk cache layout
-
-Each species produces up to four sidecar files in `IMAGE_CACHE_DIR`:
-
-| File | Contents |
-|---|---|
-| `{Scientific_name}.jpg` | Cached photo from iNaturalist |
-| `{Scientific_name}.jpg.name` | Common name (plain text) |
-| `{Scientific_name}.jpg.id` | iNaturalist taxon ID (integer, plain text) |
-| `{Scientific_name}.jpg.focus` | Crop anchor as `x,y` normalized coordinates (plain text) — only written when smart cropping is enabled |
-
-The `.name`, `.id`, and `.focus` files are all plain text and safe to hand-edit — delete one to force a fresh lookup, or edit `.focus` directly to manually correct a crop that doesn't look right. The `.name`/`.id` pair must both exist for the cache to be considered complete; a missing one triggers a fresh iNaturalist API call. Browse the cache with:
-
-```bash
-docker run --rm -v birdhouse_birdhouse-images:/cache alpine ls /cache
-```
+`make check-template` needs Node. The repository is MIT-licensed
+([LICENSE](LICENSE)); issues and pull requests are best-effort.

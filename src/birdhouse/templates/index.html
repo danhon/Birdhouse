@@ -135,8 +135,12 @@
       position: fixed;
       bottom: 10px;
       right: 1rem;
+      max-width: min(60vw, 32rem);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       font-size: 0.6rem;
-      color: rgba(255, 255, 255, 0.22);
+      color: rgba(255, 255, 255, 0.32);
       letter-spacing: 0.06em;
       text-transform: uppercase;
       z-index: 10;
@@ -144,7 +148,7 @@
     }
 
     .attribution:hover {
-      color: rgba(255, 255, 255, 0.5);
+      color: rgba(255, 255, 255, 0.6);
     }
 
     .slide__detection-count {
@@ -617,6 +621,21 @@
       color: rgba(255, 255, 255, 0.25);
     }
 
+    .history__credit {
+      display: block;
+      margin-top: 1rem;
+      text-align: center;
+      font-size: clamp(0.55rem, 0.9vw, 0.65rem);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.3);
+      text-decoration: none;
+    }
+
+    .history__credit:hover {
+      color: rgba(255, 255, 255, 0.55);
+    }
+
     /* History layout: bars, one per day, with a count axis */
 
     .history__chart-grid {
@@ -781,6 +800,52 @@
       }
     }
 
+    /* ── Diagnostic (inputs unreadable) ───────────────────── */
+
+    .problem {
+      min-height: 100vh;
+      max-width: 46rem;
+      margin: 0 auto;
+      padding: 4rem 3rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 1rem;
+    }
+
+    .problem__label {
+      font-size: clamp(0.7rem, 1.2vw, 0.85rem);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.45);
+    }
+
+    .problem__title {
+      font-family: "Georgia", "Times New Roman", serif;
+      font-size: clamp(1.7rem, 3.5vw, 2.6rem);
+      font-weight: 500;
+      line-height: 1.15;
+    }
+
+    .problem__body {
+      max-width: 38rem;
+      font-size: clamp(0.95rem, 1.6vw, 1.1rem);
+      line-height: 1.65;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .problem__hint {
+      font-size: clamp(0.78rem, 1.2vw, 0.85rem);
+      letter-spacing: 0.02em;
+      color: rgba(255, 255, 255, 0.38);
+    }
+
+    @media (max-width: 600px) {
+      .problem {
+        padding: 2rem 1.25rem;
+      }
+    }
+
     /* ── Empty state ──────────────────────────────────────── */
 
     .empty {
@@ -805,7 +870,17 @@
 </head>
 <body>
 
-{% if species %}
+{% if problem %}
+
+  <div class="problem">
+    <div class="problem__label">Birdhouse · BirdNET-Go</div>
+    <div class="problem__title">The display can't read BirdNET-Go</div>
+    <p class="problem__body">{{ problem }}</p>
+    <p class="problem__hint">INSTALL.md has the paths and the checks. This page retries every minute.</p>
+  </div>
+  <script>setTimeout(function () { location.reload(); }, 60000);</script>
+
+{% elif species %}
 
   <div class="header">
     <span class="header__date">{{ date_label }}</span>
@@ -852,16 +927,18 @@
         </div>
       </div>
 
+      {% if sp.credit %}
+      <a class="attribution"
+         href="{{ sp.credit_url }}"
+         target="_blank"
+         rel="noopener noreferrer">{{ sp.credit }}</a>
+      {% endif %}
+
     </div>
     {% endfor %}
   </div>
 
   <div class="progress" id="progress"></div>
-
-  <a class="attribution"
-     href="https://www.inaturalist.org"
-     target="_blank"
-     rel="noopener noreferrer">Photos via iNaturalist</a>
 
   <div class="overlay" id="species-overlay" hidden
        role="dialog" aria-modal="true" aria-label="Species detected today">
@@ -918,6 +995,9 @@
           <button class="history__switch-option" type="button"
                   data-history-style="field" aria-pressed="false">Calendar</button>
         </div>
+        <a class="history__credit" id="history-credit"
+           href="https://www.inaturalist.org"
+           target="_blank" rel="noopener noreferrer" hidden></a>
       </div>
     </div>
   </div>
@@ -1117,6 +1197,7 @@
       const historyWindow      = document.getElementById('history-window');
       const historyStats       = document.getElementById('history-stats');
       const historyCaption     = document.getElementById('history-caption');
+      const historyCredit      = document.getElementById('history-credit');
       const historyClose       = historyOverlay.querySelector('.overlay__close');
       const nameButtons        = Array.from(document.querySelectorAll('.slide__common'));
       const switchButtons      = Array.from(historyOverlay.querySelectorAll('.history__switch-option'));
@@ -1333,6 +1414,13 @@
         historyCaption.textContent =
           style === 'field' ? 'Each square is a day; the number is that day\'s detections.'
           : 'Each bar is a day; its height is that day\'s detections.';
+        if (data.credit) {
+          historyCredit.textContent = data.credit;
+          historyCredit.href = data.credit_url || 'https://www.inaturalist.org';
+          historyCredit.hidden = false;
+        } else {
+          historyCredit.hidden = true;
+        }
         syncHistorySwitch();
       }
 
@@ -1348,6 +1436,7 @@
         historyChart.textContent      = '';
         historyStats.textContent      = '';
         historyCaption.textContent    = 'Reading the last 30 days…';
+        historyCredit.hidden          = true;
         lastHistoryData = null;
 
         const token = ++historyToken;

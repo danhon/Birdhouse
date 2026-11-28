@@ -1,13 +1,15 @@
 """Tests for iNaturalist image fetching and disk caching."""
 
 import json
+import pytest
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 
 import requests
 import responses as rsps_lib
 
-from birdhouse.app import fetch_species_image, _safe_filename
+from birdhouse.app import (_credit_text, _read_credit, fetch_species_image,
+                           _safe_filename)
 
 INAT_URL = "https://api.inaturalist.org/v1/taxa"
 FAKE_IMAGE_URL = "https://static.inaturalist.org/photos/1/large.jpg"
@@ -25,7 +27,13 @@ def _inat_response(
             "id": taxon_id,
             "name": scientific_name,
             "preferred_common_name": common_name,
-            "default_photo": {"large_url": image_url, "medium_url": image_url},
+            "default_photo": {
+            "large_url": image_url,
+            "medium_url": image_url,
+            "id": 24115,
+            "attribution": "(c) Joe McKenna, some rights reserved (CC BY-NC)",
+            "license_code": "cc-by-nc",
+        },
         }]
     }
 
@@ -59,12 +67,22 @@ def test_downloads_and_caches_image(tmp_path):
     assert focus is None   # no vision_client supplied
 
 
-@rsps_lib.activate
-def test_returns_cached_file_without_network(tmp_path):
+def _cached_photo(tmp_path):
     filename = _safe_filename("Corvus brachyrhynchos")
     (tmp_path / filename).write_bytes(FAKE_IMAGE_BYTES)
     (tmp_path / (filename + ".name")).write_text("American Crow", encoding="utf-8")
     (tmp_path / (filename + ".id")).write_text("12727", encoding="utf-8")
+    return filename
+
+
+@rsps_lib.activate
+def test_returns_cached_file_without_network(tmp_path):
+    filename = _cached_photo(tmp_path)
+    (tmp_path / (filename + ".credit")).write_text(
+        json.dumps({"attribution": "(c) Joe McKenna, some rights reserved (CC BY-NC)",
+                    "license_code": "cc-by-nc", "photo_id": 24115,
+                    "url": "https://www.inaturalist.org/photos/24115"}),
+        encoding="utf-8")
 
     image_path, common_name, inat_id, focus = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
 
@@ -73,6 +91,37 @@ def test_returns_cached_file_without_network(tmp_path):
     assert common_name == "American Crow"
     assert inat_id == 12727
     assert focus is None
+    assert _read_credit(tmp_path, filename) == (
+        "Photo: Joe McKenna · CC BY-NC", "https://www.inaturalist.org/photos/24115")
+
+
+@rsps_lib.activate
+def test_a_photo_cached_before_credits_gains_one_on_the_next_poll(tmp_path):
+    filename = _cached_photo(tmp_path)
+    rsps_lib.add(rsps_lib.GET, INAT_URL, json=_inat_response("Corvus brachyrhynchos"))
+
+    image_path, _, _, _ = fetch_species_image("Corvus brachyrhynchos", tmp_path, requests.Session())
+
+    assert image_path == filename
+    assert len(rsps_lib.calls) == 1      # only the taxon lookup; no image download
+    assert (tmp_path / (filename + ".credit")).exists()
+    assert _read_credit(tmp_path, filename)[0] == "Photo: Joe McKenna · CC BY-NC"
+
+
+class TestCreditText:
+    @pytest.mark.parametrize("attribution,license_code,expected", [
+        ("(c) Joe McKenna, some rights reserved (CC BY-NC)", "cc-by-nc",
+         "Photo: Joe McKenna · CC BY-NC"),
+        ("(c) Jane Doe, all rights reserved", "", "Photo: Jane Doe"),
+        ("", "cc0", "Photo · CC0"),
+        ("no rights reserved", "cc0", "Photo · CC0"),
+        ("", "", ""),
+    ])
+    def test_formats_the_short_credit(self, attribution, license_code, expected):
+        assert _credit_text(attribution, license_code) == expected
+
+    def test_a_missing_credit_file_is_unknown(self, tmp_path):
+        assert _read_credit(tmp_path, "Corvus_brachyrhynchos.jpg") == ("", "")
 
 
 @rsps_lib.activate
