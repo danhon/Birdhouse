@@ -28,12 +28,9 @@ install is the way. Nothing is built: two files, one
 command. You still need the two BirdNET-Go files from
 [Before you start](#before-you-start).
 
-**No image is published yet.** The image install begins with the next
-release, `v0.1.1` (the image is tagged `0.1.1`); until then, build from
-source with
-[Configure](#configure) and [Run](#run) below. If the pull says
-`manifest unknown` or `denied`, that release isn't out, or its package isn't
-public yet — use the source install.
+The first release image is tagged `0.1.1`; `latest` follows the newest
+release. If the pull says `manifest unknown` or `denied`, that version isn't
+published, or the package isn't public yet — use the source install.
 
 In `.env`, besides the two host paths:
 

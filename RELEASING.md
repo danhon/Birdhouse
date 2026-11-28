@@ -62,8 +62,10 @@ After the tag:
 
 - [ ] The tag's `release` workflow is green, and the run lists the version
       tag and (for a release) `latest`.
-- [ ] The package is public — a first release only. A GHCR package pushed by
-      `GITHUB_TOKEN` starts private; change its visibility at
+- [ ] The package is public: an anonymous pull (below) is the test. For
+      `v0.1.1` it came out public without a visibility change, the package
+      inheriting the public repository; if a future package starts private,
+      change it at
       <https://github.com/users/danhon/packages/container/birdhouse/settings>.
 - [ ] `docker pull ghcr.io/danhon/birdhouse:X.Y.Z` works **without**
       credentials, from a shell with no `docker login`.
@@ -77,10 +79,9 @@ After the tag:
       commit (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove
       that check's project and volume afterwards with
       `COMPOSE_PROJECT_NAME=birdhouse-image-check docker compose -f compose.image.yml down -v`.
-- [ ] On the first release only, and only now that the pull above works
-      without credentials, delete the "No image is published yet" paragraph
-      from INSTALL.md's *Quick start* **and** the matching line above the
-      image block in README.md's *Quick start*.
+- [ ] If this release is the first with the image, and only once the pull
+      above works without credentials, take any "not published yet" wording
+      out of INSTALL.md's and README.md's *Quick start* (done at `v0.1.1`).
 
 **A failed release.** If the run fails before anything is pushed to the
 registry (the version check, a missing image, `actionlint`'s kind of
@@ -89,9 +90,9 @@ moved. Once any image has been pushed, **never re-push a tag**: the
 workflow refuses an existing version on purpose. Bump the version instead.
 
 If GHCR words a missing tag differently from `not found`, `manifest
-unknown` or `name unknown`, the first release stops at that check with the
-output printed. That is safe; add the wording to the pattern in
-`release.yml` and re-run.
+unknown` or `name unknown`, a release stops at that check with the output
+printed. That is safe; add the wording to the pattern in `release.yml` and
+re-run the tag (nothing was pushed).
 
 The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
 The reference deployment still builds from source with `make deploy`.
@@ -128,3 +129,38 @@ Not exercised: the BirdNET-Go API at `BIRDNET_BASE_URL` is unreachable from
 that detached local stack, so common names came from iNaturalist — which is
 the documented fallback. A real deployment with the API reachable needs one
 morning of real data to confirm the same page.
+
+## The v0.1.1 run — 2026-11-27
+
+The first image release. Before the tag: [run 46111506985](https://github.com/danhon/Birdhouse/actions/runs/46111506985)
+green; the image built locally from `319ba18` and served through
+`compose.image.yml` in a throwaway folder as project
+`birdhouse-image-check` — 79 species, photo credits, the 30-day history and
+`/healthz` naming the commit. The live deployment (`birdhouse`, up 5 hours)
+was untouched.
+
+- [x] The tag/version guard was proved first with a scratch tag,
+      `v0.1.0-test`: the `test` job passed and `publish` refused it at the
+      version check ([run 46111545927](https://github.com/danhon/Birdhouse/actions/runs/46111545927)).
+      That run also showed `metadata-action` publishes `0.1.0-test` from
+      `v0.1.0-test` even with `pattern=v{{version}}`: image tags carry no
+      `v`. The pattern, the guard and every doc were corrected before the
+      real tag.
+- [x] `make test` 149 passed (with `uv lock` refreshed for 0.1.1) and
+      `actionlint` clean on both workflows.
+- [x] `v0.1.1` at `cf64b5f` published by [run 46111687839](https://github.com/danhon/Birdhouse/actions/runs/46111687839):
+      `ghcr.io/danhon/birdhouse:0.1.1` and `:latest`.
+- [x] The package was public with no visibility change: `docker pull` with an
+      empty `DOCKER_CONFIG` fetched `0.1.1` (`sha256:48343ad8a68f`) and
+      `latest`.
+- [x] `/healthz` from the pulled image reports `cf64b5f3791f0ad9cc8300e79f27af389f0f313f`,
+      the tagged commit.
+- [x] INSTALL's quick start from the pulled image, as project
+      `birdhouse-image-check`: 79 species, a slide with a photo credit, the
+      history panel, `/healthz` on the pulled tag. Project and volume
+      removed afterwards.
+- [x] The "not yet published" text came out of INSTALL.md and README.md in
+      the same commit.
+
+Not exercised: a pre-release tag's `latest` behaviour, and arm64 (refused
+by design).

@@ -34,9 +34,7 @@ Status: v0.1.1, MIT. One Birdhouse per BirdNET-Go installation; you run both.
 
 ## Quick start
 
-From the published image — no clone, no build (linux/amd64). **No image is
-published yet:** it begins with the next release, `0.1.1` (git tag `v0.1.1`); until then, use
-the source install below.
+From the published image — no clone, no build (linux/amd64).
 
 ```bash
 mkdir birdhouse && cd birdhouse
