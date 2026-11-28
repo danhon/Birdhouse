@@ -38,12 +38,18 @@ Before the tag:
       `docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t ghcr.io/danhon/birdhouse:local .`,
       then, in an empty folder, do what the quick start does: copy
       `compose.image.yml` and your real `.env` in, `mkdir -p logs`, and run
-      `BIRDHOUSE_IMAGE_TAG=local docker compose -f compose.image.yml up -d`
+      `COMPOSE_PROJECT_NAME=birdhouse-image-check BIRDHOUSE_IMAGE_TAG=local docker compose -f compose.image.yml up -d`
       *there*. (Compose takes the folder of the `-f` file as the project
       directory, so pointing `-f` at the checkout would read the checkout's
       `.env`, `logs` and volume.) The page serves, and `/healthz` reports
-      that commit. Afterwards `docker compose -f compose.image.yml down -v`,
+      that commit. Afterwards
+      `COMPOSE_PROJECT_NAME=birdhouse-image-check docker compose -f compose.image.yml down -v`,
       remove the folder, and `docker rmi ghcr.io/danhon/birdhouse:local`.
+      **Always set `COMPOSE_PROJECT_NAME=birdhouse-image-check`** on every
+      Compose command of these checks: a folder named `birdhouse` makes
+      Compose's project `birdhouse`, which is the live deployment's — `up -d`
+      would recreate its container without its Traefik overlay, and `down -v`
+      would delete its photo cache, `.focus` crop anchors included.
 
 After the tag:
 
@@ -54,14 +60,19 @@ After the tag:
       <https://github.com/users/danhon/packages/container/birdhouse/settings>.
 - [ ] `docker pull ghcr.io/danhon/birdhouse:vX.Y.Z` works **without**
       credentials, from a shell with no `docker login`.
-- [ ] In an empty folder, run INSTALL.md's *Quick start* as written with
-      `BIRDHOUSE_IMAGE_TAG=vX.Y.Z` in `.env`: it pulls, the three-point
-      check in *Run* passes, and `/healthz` reports the tagged commit
-      (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove that
-      check's project and volume afterwards.
+- [ ] In an empty folder, run INSTALL.md's *Quick start* as written, with
+      `COMPOSE_PROJECT_NAME=birdhouse-image-check` set in the environment
+      of every `docker compose` command (the quick start's `mkdir birdhouse`
+      would otherwise name the project after the live deployment's; see
+      above) and `BIRDHOUSE_IMAGE_TAG=vX.Y.Z` in `.env`: it pulls, the
+      three-point check in *Run* passes, and `/healthz` reports the tagged
+      commit (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove
+      that check's project and volume afterwards with
+      `COMPOSE_PROJECT_NAME=birdhouse-image-check docker compose -f compose.image.yml down -v`.
 - [ ] On the first release only, and only now that the pull above works
       without credentials, delete the "No image is published yet" paragraph
-      from INSTALL.md's *Quick start*.
+      from INSTALL.md's *Quick start* **and** the matching line above the
+      image block in README.md's *Quick start*.
 
 The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
 The reference deployment still builds from source with `make deploy`.

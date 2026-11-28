@@ -2,8 +2,8 @@
 
 Two files that mount the same data can drift; this compares what Docker
 Compose resolves for each, so an edit to one that isn't made to the other
-fails here. Each file is resolved in its own throwaway directory with a stub
-`.env`, because a clone has none and `env_file: .env` is required — and with
+fails here. Both are resolved in the same throwaway directory, so relative
+paths and volume names resolve alike, with a stub `.env`, because a clone has none and `env_file: .env` is required — and with
 COMPOSE_* variables stripped, because `make deploy`/`make run` export them.
 `--no-env-resolution` keeps `env_file` in the output; without it Compose folds
 the file's contents into `environment` and the `env_file` key disappears.
@@ -53,7 +53,11 @@ def _resolved(tmp_path: Path, *compose_files: str, **extra: str) -> dict:
     for name in compose_files:
         shutil.copy(ROOT / name, tmp_path / name)
     (tmp_path / ".env").write_text("")
-    env = {k: v for k, v in os.environ.items() if not k.startswith("COMPOSE_")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("COMPOSE_") and k != "BIRDHOUSE_LOG_DIR"
+    }
     env.update(REQUIRED_ENV, **extra)
     command = ["docker", "compose"]
     for name in compose_files:

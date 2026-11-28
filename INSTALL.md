@@ -22,7 +22,9 @@ Birdhouse is tested with **BirdNET-Go 20261031**. See
 
 ## Quick start (the published image)
 
-Birdhouse's image is for **linux/amd64**. Nothing is built: two files, one
+Birdhouse's image is for **linux/amd64**; on arm64 (a Raspberry Pi, say) the
+pull fails with `no matching manifest for linux/arm64/v8`, and the source
+install is the way. Nothing is built: two files, one
 command. You still need the two BirdNET-Go files from
 [Before you start](#before-you-start).
 
@@ -166,10 +168,11 @@ sake. Birdhouse only needs the mounted files.
 ## Upgrades, the cache and backups
 
 - **Image install:** `docker compose -f compose.image.yml pull`, then
-  `up -d` again; change `BIRDHOUSE_IMAGE_TAG` to move to another version.
-  The photo cache volume persists. It is named after the folder you run in,
-  so an image install and a source install in folders of the same name
-  (`birdhouse`) share it.
+  `docker compose -f compose.image.yml up -d`; change `BIRDHOUSE_IMAGE_TAG`
+  to move to another version. The photo cache volume persists across pulls.
+  It belongs to the compose project — the folder's name for the image
+  install, `birdhouse-local` for `make run` — so switching from one install
+  to the other fetches the photos once more.
 - **Source install:** pull a new commit and run `make run` again; the image
   rebuilds and the photo volume persists.
 - The photo cache is the `birdhouse-images` Docker volume. It holds each
