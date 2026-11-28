@@ -34,6 +34,12 @@ character, so a pre-release is `0.2.0-rc1` in both, not `0.2.0rc1`.
 
 Before the tag:
 
+- [ ] `pyproject.toml` and `uv.lock` agree: bump `version`, run `uv lock`,
+      and commit `uv.lock` with the bump. A stale lock makes `make test`
+      rewrite it, leaving a dirty checkout that `make deploy` refuses.
+- [ ] `actionlint` passes on `.github/workflows/release.yml` and
+      `tests.yml` (an unknown action input only fails on a tag push
+      otherwise).
 - [ ] Build the image and run it through the install file the stranger gets:
       `docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD) -t ghcr.io/danhon/birdhouse:local .`,
       then, in an empty folder, do what the quick start does: copy
@@ -73,6 +79,17 @@ After the tag:
       without credentials, delete the "No image is published yet" paragraph
       from INSTALL.md's *Quick start* **and** the matching line above the
       image block in README.md's *Quick start*.
+
+**A failed release.** If the run fails before anything is pushed to the
+registry (the version check, a missing image, `actionlint`'s kind of
+mistake), fix it, then delete and re-push the tag — nothing published has
+moved. Once any image has been pushed, **never re-push a tag**: the
+workflow refuses an existing version on purpose. Bump the version instead.
+
+If GHCR words a missing tag differently from `not found`, `manifest
+unknown` or `name unknown`, the first release stops at that check with the
+output printed. That is safe; add the wording to the pattern in
+`release.yml` and re-run.
 
 The image-based install is `compose.image.yml` (INSTALL.md, *Quick start*).
 The reference deployment still builds from source with `make deploy`.

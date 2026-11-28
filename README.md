@@ -8,7 +8,7 @@ behind a tap.
 Reference display: **[birdhouse.sgc.rayandhon.com](https://birdhouse.sgc.rayandhon.com)**
 (Dan's own installation — public, no authentication).
 
-Status: v0.1.0, MIT. One Birdhouse per BirdNET-Go installation; you run both.
+Status: v0.1.1, MIT. One Birdhouse per BirdNET-Go installation; you run both.
 
 ---
 

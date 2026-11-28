@@ -3,6 +3,12 @@
 Notable changes to Birdhouse. The format is loosely Keep a Changelog; the
 version is the git tag.
 
+## v0.1.1 — 2026-11-27
+
+- Birdhouse is published as an image, `ghcr.io/danhon/birdhouse` for
+  linux/amd64: install with `compose.image.yml` and no build, pinning a
+  version with `BIRDHOUSE_IMAGE_TAG`. The source install is unchanged.
+
 ## v0.1.0 — 2026-11-27
 
 First public release.
