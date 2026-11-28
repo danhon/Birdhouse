@@ -1,5 +1,12 @@
 # Distribution: a published image (design)
 
+> **Correction made at the release.** The plan assumed the image tag keeps
+> the git tag's `v` (`v0.1.1`, via `pattern=v{{version}}`). `metadata-action`
+> strips a leading `v` from the pattern's result regardless — a scratch tag
+> (`v0.1.0-test`) published as `0.1.0-test` — so the image tag is `0.1.1`,
+> the guard compares the *published* version to `project.version`, and every
+> doc pins `0.1.1`. Git tags keep the `v`.
+
 Issue: [danhon/Birdhouse#10](https://github.com/danhon/Birdhouse/issues/10).
 Status: agreed with Dan 2026-11-27 — **linux/amd64 only**, no arm64 until
 someone asks for it.

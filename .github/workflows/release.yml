@@ -39,14 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # v0.1.1 always; `latest` for a release only, never for a pre-release
-      # tag such as v0.2.0-rc1 (the action's default flavour).
+      # The image tag drops the git tag's `v` (0.1.1 from v0.1.1) — the
+      # action strips a leading `v` even when the pattern spells one, which
+      # a scratch tag proved — so the docs pin 0.1.1. `latest` only for a
+      # release, never for a pre-release tag such as v0.2.0-rc1.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/danhon/birdhouse
           tags: |
-            type=semver,pattern=v{{version}}
+            type=semver,pattern={{version}}
 
       # The tag is the version: refuse v0.1.1 over a pyproject that says
       # something else, or a tag spelled differently from the one
@@ -60,8 +62,8 @@ jobs:
             echo "tag ${GITHUB_REF_NAME} does not match project.version $version" >&2
             exit 1
           fi
-          if [ "${PUSHED_TAG}" != "${GITHUB_REF_NAME}" ]; then
-            echo "tag ${GITHUB_REF_NAME} is not the tag that would be pushed (${PUSHED_TAG})" >&2
+          if [ "${PUSHED_TAG}" != "${version}" ]; then
+            echo "tag ${GITHUB_REF_NAME} publishes as ${PUSHED_TAG}, which is not project.version ${version}" >&2
             exit 1
           fi
 

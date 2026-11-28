@@ -29,7 +29,8 @@ command. You still need the two BirdNET-Go files from
 [Before you start](#before-you-start).
 
 **No image is published yet.** The image install begins with the next
-release, `v0.1.1`; until then, build from source with
+release, `v0.1.1` (the image is tagged `0.1.1`); until then, build from
+source with
 [Configure](#configure) and [Run](#run) below. If the pull says
 `manifest unknown` or `denied`, that release isn't out, or its package isn't
 public yet — use the source install.
@@ -40,7 +41,8 @@ In `.env`, besides the two host paths:
   `BIRDNET_BASE_URL=http://host.docker.internal:8080` — the compose file
   provides that hostname. The default, `birdnet-go:8080`, doesn't resolve
   there, and common names fall back to iNaturalist.
-- To pin a version, set `BIRDHOUSE_IMAGE_TAG=v0.1.1`. Put it in `.env`, not
+- To pin a version, set `BIRDHOUSE_IMAGE_TAG=0.1.1` — the image tag without
+its git `v`. Put it in `.env`, not
   only on the command line, so a later `pull` and `up` agree; without it you
   get `ghcr.io/danhon/birdhouse:latest`.
 

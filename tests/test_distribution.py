@@ -90,5 +90,5 @@ def test_image_compose_matches_source_compose(tmp_path):
 
 
 def test_image_compose_takes_a_pinned_version(tmp_path):
-    image = _resolved(tmp_path, "compose.image.yml", BIRDHOUSE_IMAGE_TAG="v0.1.1")
-    assert image["services"]["app"]["image"] == "ghcr.io/danhon/birdhouse:v0.1.1"
+    image = _resolved(tmp_path, "compose.image.yml", BIRDHOUSE_IMAGE_TAG="0.1.1")
+    assert image["services"]["app"]["image"] == "ghcr.io/danhon/birdhouse:0.1.1"

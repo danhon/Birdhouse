@@ -1,5 +1,12 @@
 # Prebuilt Image Implementation Plan
 
+> **Correction made at the release.** The plan assumed the image tag keeps
+> the git tag's `v` (`v0.1.1`, via `pattern=v{{version}}`). `metadata-action`
+> strips a leading `v` from the pattern's result regardless — a scratch tag
+> (`v0.1.0-test`) published as `0.1.0-test` — so the image tag is `0.1.1`,
+> the guard compares the *published* version to `project.version`, and every
+> doc pins `0.1.1`. Git tags keep the `v`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** An operator with Docker and a BirdNET-Go can install Birdhouse from a published `ghcr.io/danhon/birdhouse` image with no clone and no build.

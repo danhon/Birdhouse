@@ -1,9 +1,10 @@
 # Installing from the published image: INSTALL.md's quick start. One file,
 # one command, no clone and no build:
 #   docker compose -f compose.image.yml up -d
-# linux/amd64 only. Pin a version with BIRDHOUSE_IMAGE_TAG=v0.1.1; the
-# default is latest. The source build (compose.yml + compose.override.yml,
-# `make run`) and a deployment (`make deploy`) are unchanged.
+# linux/amd64 only. Pin a version with BIRDHOUSE_IMAGE_TAG=0.1.1 — the
+# image tag carries no `v`; the default is latest. The source build
+# (compose.yml + compose.override.yml, `make run`) and a deployment
+# (`make deploy`) are unchanged.
 services:
   app:
     image: ghcr.io/danhon/birdhouse:${BIRDHOUSE_IMAGE_TAG:-latest}

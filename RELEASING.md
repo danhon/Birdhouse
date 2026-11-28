@@ -26,7 +26,8 @@ an *after* part. Record the result below.
 
 ## The image
 
-A release tag publishes `ghcr.io/danhon/birdhouse:<version>` and `latest`
+A release tag publishes `ghcr.io/danhon/birdhouse:<version without its v>`
+and `latest`
 for `linux/amd64`, built by `.github/workflows/release.yml`. The workflow
 refuses a tag whose number doesn't match `project.version`, so bump
 `pyproject.toml` and `CHANGELOG.md` *before* tagging — character for
@@ -64,13 +65,14 @@ After the tag:
 - [ ] The package is public — a first release only. A GHCR package pushed by
       `GITHUB_TOKEN` starts private; change its visibility at
       <https://github.com/users/danhon/packages/container/birdhouse/settings>.
-- [ ] `docker pull ghcr.io/danhon/birdhouse:vX.Y.Z` works **without**
+- [ ] `docker pull ghcr.io/danhon/birdhouse:X.Y.Z` works **without**
       credentials, from a shell with no `docker login`.
 - [ ] In an empty folder, run INSTALL.md's *Quick start* as written, with
       `COMPOSE_PROJECT_NAME=birdhouse-image-check` set in the environment
       of every `docker compose` command (the quick start's `mkdir birdhouse`
       would otherwise name the project after the live deployment's; see
-      above) and `BIRDHOUSE_IMAGE_TAG=vX.Y.Z` in `.env`: it pulls, the
+      above) and `BIRDHOUSE_IMAGE_TAG=X.Y.Z` in `.env` (the image tag drops the git tag's
+      `v`): it pulls, the
       three-point check in *Run* passes, and `/healthz` reports the tagged
       commit (`curl -s localhost:8090/healthz` → `"build":"<sha>"`). Remove
       that check's project and volume afterwards with
