@@ -57,15 +57,18 @@ jobs:
           password: ${{ github.token }}
 
       # A published version never moves: a re-pushed tag fails here instead
-      # of overwriting the image and re-pointing latest at it. Authenticated,
-      # so first-release "not found" is trustworthy.
+      # of overwriting the image and re-pointing latest at it. Only a "not
+      # found" answer lets the build proceed; any other failure (network,
+      # auth, rate limit, registry 5xx) fails closed, so the check never
+      # passes by accident.
       - name: The version isn't published yet
         run: |
-          if docker buildx imagetools inspect \
-              "ghcr.io/danhon/birdhouse:${GITHUB_REF_NAME}" >/dev/null 2>&1; then
-            echo "ghcr.io/danhon/birdhouse:${GITHUB_REF_NAME} already exists" >&2
+          ref="ghcr.io/danhon/birdhouse:${GITHUB_REF_NAME}"
+          if out=$(docker buildx imagetools inspect "$ref" 2>&1); then
+            echo "$ref already exists" >&2
             exit 1
           fi
+          echo "$out" | grep -qiE 'not found|manifest unknown|name unknown' || { echo "$out" >&2; exit 1; }
 
       # v0.1.1 always; `latest` for a release only, never for a pre-release
       # tag such as v0.2.0-rc1 (the action's default flavour).
