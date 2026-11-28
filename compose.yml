@@ -1,3 +1,5 @@
+# The source build: `make run`, or a deployment that sets COMPOSE_FILE.
+# Installing from the published image instead: compose.image.yml.
 services:
   app:
     build:

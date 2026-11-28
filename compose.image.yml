@@ -1,0 +1,35 @@
+# Installing from the published image: INSTALL.md's quick start. One file,
+# one command, no clone and no build:
+#   docker compose -f compose.image.yml up -d
+# linux/amd64 only. Pin a version with BIRDHOUSE_IMAGE_TAG=v0.1.1; the
+# default is latest. The source build (compose.yml + compose.override.yml,
+# `make run`) and a deployment (`make deploy`) are unchanged.
+services:
+  app:
+    image: ghcr.io/danhon/birdhouse:${BIRDHOUSE_IMAGE_TAG:-latest}
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python3", "-I", "-S", "/app/src/birdhouse/healthcheck.py"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+      start_interval: 1s
+    volumes:
+      - ${BIRDNET_DB_HOST_PATH:?set BIRDNET_DB_HOST_PATH in .env}:/data/birdnet.db:ro
+      - ${BIRDNET_TAXONOMY_HOST_PATH:?set BIRDNET_TAXONOMY_HOST_PATH in .env}:/data/taxonomy.csv:ro
+      - birdhouse-images:/app/data/image-cache
+      - ${BIRDHOUSE_LOG_DIR:-./logs}:/logs
+
+volumes:
+  birdhouse-images:
